@@ -2,6 +2,8 @@ package com.memind.mobile.core
 
 import com.memind.mobile.core.insight.InsightTree
 import com.memind.mobile.core.model.AddResult
+import com.memind.mobile.core.model.ContextRequest
+import com.memind.mobile.core.model.ContextWindow
 import com.memind.mobile.core.model.ExtractionConfig
 import com.memind.mobile.core.model.ExtractionResult
 import com.memind.mobile.core.model.HealthStatus
@@ -97,6 +99,14 @@ public interface Memory : AutoCloseable {
      * 支持 scope、category、历史上下文和检索配置等高级控制。
      */
     public suspend fun retrieve(request: RetrievalRequest): RetrievalResult
+
+    // ===== Context =====
+    /**
+     * 构建可直接注入模型 prompt 的上下文窗口。
+     *
+     * 默认组合 recent buffer 和可选记忆检索结果，供宿主 App 在回复前取上下文。
+     */
+    public suspend fun getContext(request: ContextRequest): ContextWindow
 
     // ===== Insight =====
     /**

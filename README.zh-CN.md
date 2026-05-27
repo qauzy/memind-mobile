@@ -98,7 +98,7 @@ ChatClient
 2. `addMessage` 把消息写入 pending/recent buffer。
 3. `commit` 把 pending 消息整理为 `RawData` 和抽取后的 `MemoryItem`。
 4. `MemoryStore` 通过 `InMemoryStore`、`JsonFileStore` 或自定义实现持久化。
-5. `retrieve` 当前执行轻量本地召回，`VectorSearch` 作为后续语义检索扩展点。
+5. `retrieve` 当前执行 BM25 风格本地召回；配置 `VectorSearch` 后可用 RRF 融合已存向量结果。
 6. `getInsightTree` 从已有记忆构建轻量树结构，供 UI、调试或检查使用。
 
 ## 当前能力
@@ -112,7 +112,8 @@ ChatClient
 - 支持 OpenAI 兼容接口 `OpenAiClient`
 - 支持规则抽取 fallback 和可选 LLM JSON 抽取
 - 支持精确 hash 去重和可选语义去重扩展点
-- 支持基础文本检索 `SimpleTextSearch`
+- 支持 BM25 风格文本检索、可选向量融合和 RRF
+- 支持 Deep-lite 本地历史扩展与轻量重排
 - 支持 USER/AGENT scope 与记忆分类过滤
 - 支持两个默认模块发布到本地 Maven 仓库
 
@@ -290,14 +291,32 @@ val extraction = memory.extract(
 println(extraction.itemIds)
 ```
 
+### 4. 构建上下文窗口
+
+```kotlin
+import com.memind.mobile.core.model.ContextRequest
+
+val context = memory.getContext(
+    ContextRequest(
+        memoryId = memoryId,
+        query = "徒步",
+        recentMessageLimit = 12,
+        maxTokens = 2_000,
+    ),
+)
+
+val recentMessages = context.recentMessages
+val memoryText = context.formattedMemories()
+```
+
 ## 设计边界
 
-当前版本是可移植核心库的早期实现，重点是稳定 API、默认构建不依赖 Android、轻量本地存储和基础检索。
+当前版本是可移植核心库的早期实现，重点是稳定 API、默认构建不依赖 Android、轻量本地存储和混合检索。
 
 - `JsonFileStore` 适合轻量本地持久化和测试。更大数据量后续应接入独立 SQLite 模块。
 - `SqliteStore` 是可选模块，不进入默认构建。需要时通过 `-Pmemind.includeSqlite=true` 启用。
 - Room 持久化不属于默认构建。未来可以在存在 Android SDK 路径时，用可选 Android 模块提供。
-- `VectorSearch` 已可注入，默认检索路径目前仍以文本检索为主。
+- `VectorSearch` 已可注入；有已存向量时会复用，embedding 或向量检索不可用时会降级到本地文本检索。
 - `InsightTree` 当前按需构建，后续会演进为 dirty flag 和增量刷新。
 - `OpenAiClient` 是 OpenAI 兼容接口适配器，生产环境建议由宿主自行管理 API Key、代理、重试、日志脱敏和网络策略。
 

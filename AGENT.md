@@ -44,3 +44,5 @@
 | 2026-05-27 | 完成阶段 4 移动版抽取 pipeline | 新增 LLM JSON extractor、时间解析、语义去重接口和 foresight 开关，并补充相关单元测试 | 使用 `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` 验证通过 |
 | 2026-05-27 | 默认构建拆为 Kotlin/JVM core 与 JSON store | 默认只编译 `memind-mobile-core` 和 `memind-store-json`，新增 JSONL 持久化模块，并让 Room/Android 路径退出默认构建 | 使用 `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` 与两个模块本地 Maven publish 验证通过，未设置 `ANDROID_HOME` |
 | 2026-05-27 | 新增可选 SQLite 持久化模块 | 新增 `memind-store-sqlite` 和 `SqliteStore`，通过 `-Pmemind.includeSqlite=true` 显式 include，避免默认编译进核心或默认构建 | 默认 `./gradlew build` 验证只编译 core/store-json；SQLite 模块测试和本地 Maven 发布验证通过 |
+| 2026-05-27 | 阶段 5 新增上下文窗口 API | 新增 `Memory.getContext(ContextRequest)`，组合 recent buffer 与检索结果，并加入轻量 token 预算裁剪 | 默认 `./gradlew build` 验证通过；`-Pmemind.includeSqlite=true :memind-store-sqlite:test` 回归通过 |
+| 2026-05-27 | 完成阶段 5 混合检索 | 将文本检索升级为 BM25 风格，实现 keyword/vector RRF 融合、score threshold、maxResults 截断和 Deep-lite 本地扩展/重排 | `:memind-mobile-core:test`、默认 `./gradlew build` 与 SQLite 可选模块回归均验证通过 |

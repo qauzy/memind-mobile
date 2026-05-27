@@ -4,7 +4,7 @@
 在可嵌入、资源受限的前提下，让 `memind-mobile` 尽量接近原版 Memind 的核心思想：对话缓冲、结构化记忆抽取、分层检索、Insight Tree 演化，以及可直接给宿主 App 使用的上下文接口。默认构建以通用 Kotlin/JVM core + JSON store 为主，Android/Room 作为可选扩展方向。
 
 ## 当前阶段
-阶段 5
+阶段 6
 
 ## 总体原则
 - 保持 `memind-mobile-core` 为无 UI、可 JAR 集成的 Kotlin/JVM 核心库。
@@ -50,13 +50,13 @@
 - **状态：** complete
 
 ### 阶段 5：混合检索与上下文接口
-- [ ] 实现 `getContext(ContextRequest)`，组合 recent messages 和 retrieval result
-- [ ] 将 `retrieve` 升级为 `RetrievalRequest` 驱动，支持 scope/category/history/config
-- [ ] 实现本地 BM25 或 TF-IDF text search
-- [ ] 接入 embedding：远程 embedding 可选，本地 stored vectors 可复用
-- [ ] 实现 Simple 策略：keyword + vector + RRF + score threshold + truncation
-- [ ] 实现 Deep-lite 策略：query rewrite/expand 可选，rerank 可选，不默认强制 LLM
-- **状态：** pending
+- [x] 实现 `getContext(ContextRequest)`，组合 recent messages 和 retrieval result
+- [x] 将 `retrieve` 升级为 `RetrievalRequest` 驱动，支持 scope/category/history/config
+- [x] 实现本地 BM25 或 TF-IDF text search
+- [x] 接入 embedding：远程 embedding 可选，本地 stored vectors 可复用
+- [x] 实现 Simple 策略：keyword + vector + RRF + score threshold + truncation
+- [x] 实现 Deep-lite 策略：query rewrite/expand 可选，rerank 可选，不默认强制 LLM
+- **状态：** complete
 
 ### 阶段 6：Insight Tree 移动化
 - [ ] 将 Insight 模型升级为 points/name/type/categories/group/tier/version

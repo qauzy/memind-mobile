@@ -14,6 +14,8 @@ import com.memind.mobile.core.llm.ChatClient
 import com.memind.mobile.core.model.AddResult
 import com.memind.mobile.core.model.AddStatus
 import com.memind.mobile.core.model.ConversationSegment
+import com.memind.mobile.core.model.ContextRequest
+import com.memind.mobile.core.model.ContextWindow
 import com.memind.mobile.core.model.ExtractionConfig
 import com.memind.mobile.core.model.ExtractionResult
 import com.memind.mobile.core.model.HealthStatus
@@ -25,10 +27,12 @@ import com.memind.mobile.core.model.RetrievalResult
 import com.memind.mobile.core.model.RetrievalStatus
 import com.memind.mobile.core.model.Strategy
 import com.memind.mobile.core.search.SimpleTextSearch
+import com.memind.mobile.core.search.ScoredItem as SearchScoredItem
 import com.memind.mobile.core.search.TextSearch
 import com.memind.mobile.core.search.VectorSearch
 import com.memind.mobile.core.store.MemoryStore
 import com.memind.mobile.core.store.InMemoryStore
+import com.memind.mobile.core.store.MemoryItem
 import java.util.concurrent.atomic.AtomicBoolean
 
 public class DefaultMemory(
@@ -156,9 +160,9 @@ public class DefaultMemory(
     }
 
     /**
-     * 使用完整检索请求执行轻量检索。
+     * 使用完整检索请求执行混合检索。
      *
-     * 当前支持文本搜索、最低分过滤、scope 过滤和 category 过滤；后续会接入 hybrid retrieval。
+     * 默认路径是本地 BM25 文本检索；当注入 VectorSearch 且 embedding 可用时，再用 RRF 融合向量召回。
      */
     override suspend fun retrieve(request: RetrievalRequest): RetrievalResult {
         val id = request.memoryId
@@ -167,22 +171,38 @@ public class DefaultMemory(
         val config = request.config
         if (query.isBlank()) return RetrievalResult.empty("$strategy", query)
 
-        // 阶段 2 默认走关键词检索，后续会在这里接入向量和 insight 的混合召回。
-        val searchResults = textSearch.search(id, query, limit = config.maxResults)
-        val categoryFilter = request.categories.orEmpty()
-
-        // 过滤顺序保持轻量：先按分数裁剪，再按 scope/category 过滤，减少后续结果映射成本。
-        val resultItems = searchResults
+        val candidateLimit = candidateLimit(config)
+        val storeCandidates = store.getItems(
+            memoryId = id,
+            limit = candidateLimit,
+            scope = request.scope,
+            categories = request.categories,
+        )
+        if (storeCandidates.isNotEmpty()) {
+            // 持久化 store 重新打开后，内存文本索引可能为空；检索前按候选集补索引。
+            textSearch.index(id, storeCandidates)
+        }
+        val expandedQuery = expandedQuery(request)
+        val keywordResults = textSearch.search(id, expandedQuery, limit = candidateLimit)
+            .filterByRequest(request)
+        val vectorResults = vectorResults(request, candidateLimit)
+            .filterByRequest(request)
+        val fused = fuseByRrf(keywordResults, vectorResults, config)
+        val reranked = if (config.enableRerank || strategy == Strategy.DEEP) {
+            rerankDeepLite(fused, request)
+        } else {
+            fused
+        }
+        val resultItems = reranked
             .filter { it.score >= config.minScore }
-            .filter { request.scope == null || it.item.scope == request.scope }
-            .filter { categoryFilter.isEmpty() || it.item.category in categoryFilter }
+            .take(config.maxResults.coerceAtLeast(0))
         val result = RetrievalResult(
-            items = resultItems.map { scored ->
-                val item = scored.item
+            items = resultItems.map { candidate ->
+                val item = candidate.item
                 RetrievalResult.ScoredItem(
                     id = item.id,
                     text = item.text,
-                    score = scored.score,
+                    score = candidate.score,
                     category = item.category?.categoryName,
                     source = item.source ?: item.sourceClient,
                     scope = item.scope,
@@ -196,6 +216,36 @@ public class DefaultMemory(
             status = if (resultItems.isEmpty()) RetrievalStatus.EMPTY else RetrievalStatus.SUCCESS,
         )
         return result
+    }
+
+    /**
+     * 构建上下文窗口。
+     *
+     * 阶段 5 先组合 recent messages 和已有检索结果；后续会扩展为 hybrid retrieval 与多层截断。
+     */
+    override suspend fun getContext(request: ContextRequest): ContextWindow {
+        if (closed.get()) {
+            return ContextWindow.bufferOnly(emptyList())
+        }
+        val recentMessages = recentBuffer.load(request.memoryId)
+            .takeLast(request.recentMessageLimit.coerceAtLeast(0))
+        val retrieval = if (request.includeMemories && !request.query.isNullOrBlank()) {
+            retrieve(
+                RetrievalRequest(
+                    memoryId = request.memoryId,
+                    query = request.query,
+                    conversationHistory = recentMessages.map { it.content },
+                    config = request.retrievalConfig.withStrategy(request.strategy),
+                ),
+            )
+        } else {
+            RetrievalResult.empty(request.strategy.name, request.query.orEmpty())
+        }
+        return fitContextWindow(
+            recentMessages = recentMessages,
+            memories = retrieval,
+            maxTokens = request.maxTokens,
+        )
     }
 
     /**
@@ -247,5 +297,227 @@ public class DefaultMemory(
         buildMap {
             messages.forEach { putAll(it.metadata) }
         }
+
+    /**
+     * 计算本次检索候选集上限。
+     *
+     * 至少覆盖 maxResults/topK 的若干倍，避免融合前过早截断，同时设置硬上限保护移动端。
+     */
+    private fun candidateLimit(config: RetrievalConfig): Int {
+        val requested = maxOf(config.maxCandidates, config.maxResults * 8, config.topK * 8)
+        return requested.coerceIn(config.maxResults.coerceAtLeast(1), 1_000)
+    }
+
+    /**
+     * 构建本地扩展查询。
+     *
+     * Deep-lite 只拼接最近 conversationHistory，不调用 LLM，保证弱网环境可用。
+     */
+    private fun expandedQuery(request: RetrievalRequest): String {
+        val config = request.config
+        if (!config.enableQueryExpansion && config.strategy != Strategy.DEEP) return request.query
+        val history = request.conversationHistory
+            .takeLast(4)
+            .joinToString(" ")
+            .trim()
+        return listOf(request.query, history)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+    }
+
+    /**
+     * 执行可选向量召回。
+     *
+     * 只有宿主注入 VectorSearch 且配置允许时才会调用 embedding；失败时返回空列表并降级为纯文本检索。
+     */
+    private suspend fun vectorResults(
+        request: RetrievalRequest,
+        candidateLimit: Int,
+    ): List<SearchScoredItem> {
+        val vectors = vectorSearch ?: return emptyList()
+        if (!request.config.enableVectorSearch) return emptyList()
+        val embedding = runCatching { chatClient.embed(request.query).embedding }.getOrDefault(emptyList())
+        if (embedding.isEmpty()) return emptyList()
+        val ids = vectors.search(
+            memoryId = request.memoryId,
+            queryEmbedding = embedding,
+            limit = maxOf(request.config.topK, request.config.maxResults, candidateLimit / 2),
+        )
+        if (ids.isEmpty()) return emptyList()
+        return store.getItemsByIds(request.memoryId, ids)
+            .mapIndexed { index, item ->
+                val rankScore = 1.0 - index.toDouble() / ids.size.coerceAtLeast(1).toDouble()
+                SearchScoredItem(item, rankScore.coerceAtLeast(0.0))
+            }
+    }
+
+    /**
+     * 过滤检索请求限定条件。
+     *
+     * scope/category 统一在融合前执行，避免不符合条件的候选进入最终排序。
+     */
+    private fun List<SearchScoredItem>.filterByRequest(request: RetrievalRequest): List<SearchScoredItem> {
+        val categoryFilter = request.categories.orEmpty()
+        return filter { scored ->
+            (request.scope == null || scored.item.scope == request.scope) &&
+                (categoryFilter.isEmpty() || scored.item.category in categoryFilter)
+        }
+    }
+
+    /**
+     * 使用归一化 RRF 融合文本与向量候选。
+     *
+     * RRF 只依赖排序位置，能自然兼容 BM25 分数和向量召回顺序不同尺度的问题。
+     */
+    private fun fuseByRrf(
+        keywordResults: List<SearchScoredItem>,
+        vectorResults: List<SearchScoredItem>,
+        config: RetrievalConfig,
+    ): List<HybridCandidate> {
+        val sources = listOf(keywordResults, vectorResults).filter { it.isNotEmpty() }
+        if (sources.isEmpty()) return emptyList()
+        val merged = linkedMapOf<String, HybridCandidate>()
+        sources.forEach { source ->
+            val maxRawScore = source.maxOfOrNull { it.score }?.takeIf { it > 0.0 } ?: 1.0
+            source.forEachIndexed { index, scored ->
+                val rank = index + 1
+                val normalizedRrf = (config.rrfK.coerceAtLeast(1) + 1.0) /
+                    (config.rrfK.coerceAtLeast(1) + rank.toDouble())
+                val rawBonus = (scored.score / maxRawScore).coerceIn(0.0, 1.0) * 0.05
+                val previous = merged[scored.item.id]
+                val nextScore = (previous?.score ?: 0.0) + normalizedRrf + rawBonus
+                merged[scored.item.id] = HybridCandidate(scored.item, nextScore)
+            }
+        }
+        return merged.values
+            .map { it.copy(score = it.score / sources.size.toDouble()) }
+            .sortedWith(compareByDescending<HybridCandidate> { it.score }.thenByDescending { it.item.createdAt })
+    }
+
+    /**
+     * 执行 Deep-lite 本地重排。
+     *
+     * 只使用查询、conversationHistory 和 item 文本的词项重叠，不强制调用 LLM reranker。
+     */
+    private fun rerankDeepLite(
+        candidates: List<HybridCandidate>,
+        request: RetrievalRequest,
+    ): List<HybridCandidate> {
+        val terms = retrievalTerms(expandedQuery(request)).toSet()
+        if (terms.isEmpty()) return candidates
+        return candidates
+            .map { candidate ->
+                val itemTerms = retrievalTerms(
+                    listOf(
+                        candidate.item.text,
+                        candidate.item.category?.categoryName.orEmpty(),
+                        candidate.item.metadata.values.joinToString(" "),
+                    ).joinToString(" "),
+                ).toSet()
+                val overlap = if (itemTerms.isEmpty()) {
+                    0.0
+                } else {
+                    terms.count { it in itemTerms }.toDouble() / terms.size.toDouble()
+                }
+                candidate.copy(score = candidate.score * 0.85 + overlap * 0.15)
+            }
+            .sortedWith(compareByDescending<HybridCandidate> { it.score }.thenByDescending { it.item.createdAt })
+    }
+
+    /**
+     * 拆分重排词项。
+     *
+     * 该逻辑与 SimpleTextSearch 保持同一轻量分词原则，避免引入 tokenizer 依赖。
+     */
+    private fun retrievalTerms(text: String): List<String> {
+        val terms = mutableListOf<String>()
+        val current = StringBuilder()
+        text.lowercase().forEach { char ->
+            when {
+                char.isLetterOrDigit() && !char.isCjk() -> current.append(char)
+                char.isCjk() -> {
+                    if (current.isNotEmpty()) {
+                        terms.add(current.toString())
+                        current.clear()
+                    }
+                    terms.add(char.toString())
+                }
+                else -> {
+                    if (current.isNotEmpty()) {
+                        terms.add(current.toString())
+                        current.clear()
+                    }
+                }
+            }
+        }
+        if (current.isNotEmpty()) {
+            terms.add(current.toString())
+        }
+        return terms.filter { it.isNotBlank() }
+    }
+
+    /**
+     * 判断字符是否属于常见 CJK 文字区间。
+     *
+     * 用于中文查询的单字级轻量召回和重排。
+     */
+    private fun Char.isCjk(): Boolean {
+        val block = Character.UnicodeBlock.of(this)
+        return block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS ||
+            block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A ||
+            block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B ||
+            block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS
+    }
+
+    /**
+     * 按轻量 token 预算裁剪上下文窗口。
+     *
+     * 移动端先使用字符数 / 4 的粗估算，优先保留最近消息，再保留最高排序的记忆。
+     */
+    private fun fitContextWindow(
+        recentMessages: List<Message>,
+        memories: RetrievalResult,
+        maxTokens: Int,
+    ): ContextWindow {
+        val budget = maxTokens.coerceAtLeast(0)
+        val keptMessages = mutableListOf<Message>()
+        var usedTokens = 0
+
+        recentMessages.asReversed().forEach { message ->
+            val messageTokens = estimateTokens(message.content)
+            if (usedTokens + messageTokens <= budget || keptMessages.isEmpty()) {
+                keptMessages.add(message)
+                usedTokens += messageTokens
+            }
+        }
+        keptMessages.reverse()
+
+        val keptItems = mutableListOf<RetrievalResult.ScoredItem>()
+        memories.items.forEach { item ->
+            val itemTokens = estimateTokens(item.text)
+            if (usedTokens + itemTokens <= budget || keptItems.isEmpty() && keptMessages.isEmpty()) {
+                keptItems.add(item)
+                usedTokens += itemTokens
+            }
+        }
+        val trimmedMemories = memories.copy(items = keptItems)
+        return ContextWindow(
+            recentMessages = keptMessages,
+            memories = trimmedMemories,
+            totalTokens = usedTokens,
+        )
+    }
+
+    /**
+     * 估算文本 token 数。
+     *
+     * 这里用保守的字符长度近似，避免核心模块依赖具体 tokenizer。
+     */
+    private fun estimateTokens(text: String): Int = (text.length + 3) / 4
+
+    private data class HybridCandidate(
+        val item: MemoryItem,
+        val score: Double,
+    )
 
 }

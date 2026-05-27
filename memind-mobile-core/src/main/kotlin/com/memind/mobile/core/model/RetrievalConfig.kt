@@ -9,6 +9,10 @@ public data class RetrievalConfig(
     val minScore: Double = 0.0,
     val enableRerank: Boolean = false,
     val topK: Int = 5,
+    val maxCandidates: Int = 200,
+    val rrfK: Int = 60,
+    val enableVectorSearch: Boolean = true,
+    val enableQueryExpansion: Boolean = false,
 ) {
     /**
      * 返回替换检索策略后的配置。
@@ -31,6 +35,27 @@ public data class RetrievalConfig(
      */
     public fun withMinScore(minScore: Double): RetrievalConfig = copy(minScore = minScore)
 
+    /**
+     * 返回替换候选集上限后的配置。
+     *
+     * maxCandidates 控制本地检索和融合前最多加载多少条记忆，避免移动端全量扫描失控。
+     */
+    public fun withMaxCandidates(maxCandidates: Int): RetrievalConfig = copy(maxCandidates = maxCandidates)
+
+    /**
+     * 返回替换向量检索开关后的配置。
+     *
+     * enableVectorSearch 为 false 时，即使注入 VectorSearch 也只走文本检索。
+     */
+    public fun withVectorSearch(enabled: Boolean): RetrievalConfig = copy(enableVectorSearch = enabled)
+
+    /**
+     * 返回替换轻量查询扩展开关后的配置。
+     *
+     * 查询扩展只使用本地 conversationHistory，不强制调用 LLM。
+     */
+    public fun withQueryExpansion(enabled: Boolean): RetrievalConfig = copy(enableQueryExpansion = enabled)
+
     public companion object {
         /**
          * 创建轻量检索配置。
@@ -44,6 +69,12 @@ public data class RetrievalConfig(
          *
          * 默认开启 rerank 标记，供后续混合检索阶段接入。
          */
-        public fun deep(): RetrievalConfig = RetrievalConfig(Strategy.DEEP, enableRerank = true)
+        public fun deep(): RetrievalConfig =
+            RetrievalConfig(
+                strategy = Strategy.DEEP,
+                enableRerank = true,
+                enableQueryExpansion = true,
+                maxCandidates = 300,
+            )
     }
 }

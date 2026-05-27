@@ -42,11 +42,16 @@
   - `ExtractionConfig` 增加 LLM、语义去重、foresight、输入长度和抽取条数控制。
 
 ### 阶段 5：混合检索与上下文接口
-- **状态：** pending
-- 下一步：
-  - 实现 `getContext(ContextRequest)`，组合 recent messages 和 retrieval result。
-  - 将 retrieve 扩展为 keyword + vector + RRF 的 Simple hybrid 策略。
-  - 为 rawData/insight tier 预留检索合并入口。
+- **状态：** complete
+- 执行的操作：
+  - 新增 `Memory.getContext(ContextRequest)` API。
+  - `DefaultMemory.getContext` 已组合 recent messages 与当前 retrieval result。
+  - 增加轻量 token 预算裁剪，优先保留最近消息，再保留检索记忆。
+  - 补充 getContext 组合上下文和禁用记忆检索的单元测试。
+  - `SimpleTextSearch` 升级为 BM25 风格本地文本检索，支持英文/数字词项和 CJK 单字词项。
+  - `DefaultMemory.retrieve` 已实现 keyword + optional vector + RRF 融合，并支持 score threshold 与 maxResults 截断。
+  - Deep-lite 使用 conversationHistory 做本地 query expansion，并执行轻量 rerank，不强制调用 LLM。
+  - 远程 embedding 只在注入 VectorSearch 且配置允许时调用；失败自动降级到文本检索。
 
 ### 构建拆分：默认 Kotlin/JVM core + store-json
 - **状态：** complete
@@ -80,6 +85,11 @@
 | `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository :memind-store-json:publishReleasePublicationToLocalBuildRepository` | 默认模块本地 Maven 发布 | 不设置 `ANDROID_HOME`，发布两个 JVM 模块 | BUILD SUCCESSFUL，生成 core/store-json 的本地 Maven 产物 | 通过 |
 | `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` | 新增 SQLite 可选模块后默认构建验证 | 默认不传 SQLite 开关 | BUILD SUCCESSFUL，只执行 core/store-json，不编译 SQLite | 通过 |
 | `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test :memind-store-sqlite:publishReleasePublicationToLocalBuildRepository` | SQLite 可选模块验证 | 显式 include SQLite store，运行测试并发布本地 Maven 产物 | BUILD SUCCESSFUL，SQLite store 单元测试和本地发布通过 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` | 阶段 5 getContext API | 默认 core + store-json 构建和测试 | BUILD SUCCESSFUL，新增 getContext 测试通过 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test` | 阶段 5 getContext 后可选 SQLite 回归 | 显式 include SQLite store 并运行测试 | BUILD SUCCESSFUL，SQLite store 测试通过 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew :memind-mobile-core:test` | 阶段 5 hybrid retrieval | BM25 排序、向量召回、Deep-lite history 扩展测试 | BUILD SUCCESSFUL，新增检索测试通过 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` | 阶段 5 完成后默认构建验证 | 默认 core + store-json 构建和测试 | BUILD SUCCESSFUL，未包含 SQLite 可选模块 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test` | 阶段 5 完成后 SQLite 回归 | 显式 include SQLite store 并运行测试 | BUILD SUCCESSFUL，SQLite store 测试通过 | 通过 |
 
 ## 错误日志
 | 时间戳 | 错误 | 尝试次数 | 解决方案 |
@@ -101,11 +111,11 @@
 ## 五问重启检查
 | 问题 | 答案 |
 |------|------|
-| 我在哪里？ | 阶段 4 已完成；默认构建已拆为 Android-free core + store-json；进入阶段 5 前 |
-| 我要去哪里？ | 阶段 5：混合检索与上下文接口 |
+| 我在哪里？ | 阶段 5 已完成；准备进入阶段 6 Insight Tree 移动化 |
+| 我要去哪里？ | 阶段 6：Insight Tree 移动化 |
 | 目标是什么？ | 完善 `memind-mobile`，在移动性能约束下接近原版 Memind 核心记忆能力 |
 | 我学到了什么？ | 见 `.planning/memind_mobile_core/findings.md` |
-| 我做了什么？ | 完成阶段 2/3，完成阶段 4 的 LLM JSON extractor、规则 fallback、时间解析、hash/语义去重和 foresight 开关；完成默认 JVM core + JSON store 构建拆分 |
+| 我做了什么？ | 完成阶段 2/3，完成阶段 4；完成默认 JVM core + JSON store 构建拆分；阶段 5 已实现 getContext、BM25 文本检索、Simple hybrid RRF 和 Deep-lite |
 
 ---
 *每个阶段完成后或遇到错误时更新此文件*

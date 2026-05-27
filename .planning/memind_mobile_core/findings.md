@@ -18,7 +18,7 @@
 - 当前默认构建只包含 `memind-mobile-core` 和 `memind-store-json` 两个 Kotlin/JVM 模块，不依赖 Android SDK。
 - 当前 `JsonFileStore` 提供 Android-free 的 JSONL 持久化；Room/Android 持久化已从默认构建路径移除，后续可作为可选模块重新接入。
 - 当前新增 `SqliteStore` 作为可选 Kotlin/JVM SQLite 持久化模块，需要 `-Pmemind.includeSqlite=true` 才会 include 和编译。
-- 当前 `retrieve` 只做简单文本匹配，没有 vector、RRF、scope/category 过滤、deep retrieval。
+- 当前 `retrieve` 已支持 BM25 风格本地文本检索、可选向量召回、RRF 融合、scope/category 过滤和 Deep-lite 本地扩展/重排。
 - 当前 `getInsightTree` 是按 item 文本临时拼装 leaf/branch/root，没有原版 insight point、group、version、flush/scheduler。
 - `RoomStore` 源码曾覆盖 items、raw_data、insights、buffer_messages 和 vector_metadata 的基础表与读写路径，但当前默认构建不编译 Android/Room 路径。
 - `JsonFileStore` 已覆盖 item、rawData、insight、buffer 的基础 JSONL 持久化路径，是当前默认持久化模块。

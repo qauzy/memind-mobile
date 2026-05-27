@@ -3,11 +3,13 @@ package com.memind.mobile.core
 import com.memind.mobile.core.llm.ChatClient
 import com.memind.mobile.core.llm.ChatResponse
 import com.memind.mobile.core.llm.EmbeddingResponse
+import com.memind.mobile.core.model.ContextRequest
 import com.memind.mobile.core.model.ExtractionConfig
 import com.memind.mobile.core.model.MemoryCategory
 import com.memind.mobile.core.model.MemoryId
 import com.memind.mobile.core.model.MemoryScope
 import com.memind.mobile.core.model.Message
+import com.memind.mobile.core.model.RetrievalConfig
 import com.memind.mobile.core.model.RetrievalRequest
 import com.memind.mobile.core.model.Strategy
 import com.memind.mobile.core.search.InMemoryVectorSearch
@@ -290,6 +292,133 @@ class MemoryTest {
     }
 
     /**
+     * 验证 getContext 会组合 recent buffer 和检索到的记忆。
+     *
+     * 这是阶段 5 的上下文接口最小闭环。
+     */
+    @Test
+    fun `test get context combines recent messages and memories`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .build()
+        val id = MemoryId.of("context-user", "context-agent")
+
+        scopedMemory.addMessage(id, Message.user("I like green tea"))
+        scopedMemory.commit(id)
+        scopedMemory.addMessage(id, Message.assistant("Noted, green tea is preferred."))
+
+        val context = scopedMemory.getContext(
+            ContextRequest(
+                memoryId = id,
+                query = "green tea",
+                recentMessageLimit = 2,
+            ),
+        )
+
+        assertEquals(2, context.recentMessages.size)
+        assertTrue(context.memories.items.isNotEmpty())
+        assertTrue(context.formattedMemories().contains("green tea", ignoreCase = true))
+    }
+
+    /**
+     * 验证 getContext 可以只返回缓冲消息。
+     *
+     * includeMemories=false 时不应触发记忆检索。
+     */
+    @Test
+    fun `test get context can disable memory retrieval`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .build()
+        val id = MemoryId.of("context-buffer-user", "context-buffer-agent")
+
+        scopedMemory.addMessage(id, Message.user("Recent only message"))
+
+        val context = scopedMemory.getContext(
+            ContextRequest(
+                memoryId = id,
+                query = "message",
+                includeMemories = false,
+            ),
+        )
+
+        assertEquals(1, context.recentMessages.size)
+        assertTrue(context.memories.isEmpty)
+        assertTrue(context.isBufferOnly)
+    }
+
+    /**
+     * 验证本地 BM25 文本检索会优先返回更匹配的记忆。
+     *
+     * 查询同时命中 green 和 tea 的 item 应排在只命中单个词的 item 前面。
+     */
+    @Test
+    fun `test bm25 text search ranks stronger lexical match first`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .build()
+        val id = MemoryId.of("bm25-user", "bm25-agent")
+
+        scopedMemory.extract(id, "The user likes green tea after lunch.")
+        scopedMemory.extract(id, "The user bought green notebooks.")
+
+        val result = scopedMemory.retrieve(id, "green tea", Strategy.SIMPLE)
+
+        assertTrue(result.items.isNotEmpty())
+        assertTrue(result.items.first().text.contains("green tea", ignoreCase = true))
+    }
+
+    /**
+     * 验证 Simple hybrid 可以用已存向量召回文本不直接命中的记忆。
+     *
+     * 这里用固定 embedding 模拟 compact 与 brief 的语义接近。
+     */
+    @Test
+    fun `test simple hybrid uses stored vector results when keyword misses`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(vectorAwareChatClient())
+            .vectorSearch(InMemoryVectorSearch())
+            .build()
+        val id = MemoryId.of("hybrid-user", "hybrid-agent")
+
+        scopedMemory.extract(
+            id,
+            "The user likes compact summaries.",
+            ExtractionConfig.defaults().withSemanticDedup(),
+        )
+        val result = scopedMemory.retrieve(id, "brief answer", Strategy.SIMPLE)
+
+        assertTrue(result.items.isNotEmpty())
+        assertTrue(result.items.first().text.contains("compact summaries", ignoreCase = true))
+    }
+
+    /**
+     * 验证 Deep-lite 会使用 conversationHistory 做本地查询扩展。
+     *
+     * 不依赖 LLM，只把最近对话线索拼入检索 query。
+     */
+    @Test
+    fun `test deep lite expands query from conversation history`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .build()
+        val id = MemoryId.of("deep-user", "deep-agent")
+
+        scopedMemory.extract(id, "The user prefers green tea in the evening.")
+        val result = scopedMemory.retrieve(
+            RetrievalRequest(
+                memoryId = id,
+                query = "preferred drink",
+                conversationHistory = listOf("The current chat is about green tea."),
+                config = RetrievalConfig.deep().withVectorSearch(false),
+            ),
+        )
+
+        assertTrue(result.items.isNotEmpty())
+        assertTrue(result.items.first().text.contains("green tea", ignoreCase = true))
+    }
+
+    /**
      * 创建测试用 ChatClient。
      *
      * 提供固定聊天、embedding 和健康检查结果，避免测试访问外部环境。
@@ -316,6 +445,43 @@ class MemoryTest {
              * 返回测试用健康状态。
              *
              * 始终为 true，避免外部依赖影响单元测试。
+             */
+            override suspend fun health(): Boolean = true
+        }
+
+    /**
+     * 创建带简单语义映射的测试 ChatClient。
+     *
+     * compact 与 brief 返回相同向量，用于验证 hybrid vector 召回路径。
+     */
+    private fun vectorAwareChatClient(): ChatClient =
+        object : ChatClient {
+            /**
+             * 返回测试用聊天响应。
+             *
+             * 该测试不走聊天抽取路径，因此只返回固定文本。
+             */
+            override suspend fun chat(prompt: String, systemMessage: String?): ChatResponse =
+                ChatResponse("Mock response")
+
+            /**
+             * 根据文本关键词返回稳定 embedding。
+             *
+             * compact/brief 共享向量，其他文本落到另一条向量。
+             */
+            override suspend fun embed(text: String): EmbeddingResponse {
+                val lower = text.lowercase()
+                return if ("compact" in lower || "brief" in lower) {
+                    EmbeddingResponse(listOf(1.0f, 0.0f))
+                } else {
+                    EmbeddingResponse(listOf(0.0f, 1.0f))
+                }
+            }
+
+            /**
+             * 返回测试健康状态。
+             *
+             * 始终为 true，避免外部服务影响检索测试。
              */
             override suspend fun health(): Boolean = true
         }

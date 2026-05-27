@@ -98,7 +98,7 @@ The core flow is:
 2. `addMessage` writes messages into pending/recent buffers.
 3. `commit` drains pending messages into `RawData` and extracted `MemoryItem` records.
 4. `MemoryStore` persists data through `InMemoryStore`, `JsonFileStore`, or a custom implementation.
-5. `retrieve` performs lightweight local recall today, with `VectorSearch` available as an extension point.
+5. `retrieve` performs BM25-style local recall and can fuse stored vector results with RRF when `VectorSearch` is configured.
 6. `getInsightTree` builds a lightweight tree from existing memory items for UI, inspection, or debugging.
 
 ## Features
@@ -112,7 +112,8 @@ The core flow is:
 - OpenAI-compatible client with `OpenAiClient`
 - Rule-based extraction fallback plus optional LLM JSON extraction
 - Exact hash deduplication and optional semantic deduplication hook
-- Basic text retrieval with `SimpleTextSearch`
+- BM25-style text retrieval with optional vector fusion and RRF
+- Deep-lite retrieval with local history expansion and lightweight reranking
 - USER/AGENT scope filtering and memory-category filtering
 - Local Maven publication support for both default modules
 
@@ -290,14 +291,32 @@ val extraction = memory.extract(
 println(extraction.itemIds)
 ```
 
+### 4. Build a Context Window
+
+```kotlin
+import com.memind.mobile.core.model.ContextRequest
+
+val context = memory.getContext(
+    ContextRequest(
+        memoryId = memoryId,
+        query = "hiking",
+        recentMessageLimit = 12,
+        maxTokens = 2_000,
+    ),
+)
+
+val recentMessages = context.recentMessages
+val memoryText = context.formattedMemories()
+```
+
 ## Design Boundaries
 
-This is an early portable-core implementation. The current focus is stable APIs, Android-free default builds, lightweight local storage, and basic retrieval.
+This is an early portable-core implementation. The current focus is stable APIs, Android-free default builds, lightweight local storage, and hybrid retrieval.
 
 - `JsonFileStore` is intended for light local persistence and tests. Larger datasets should use a dedicated SQLite module later.
 - `SqliteStore` is optional and not included in the default build. Enable it with `-Pmemind.includeSqlite=true`.
 - Room persistence is not part of the default build. A future optional Android module can provide it when an Android SDK path is available.
-- `VectorSearch` can be injected, while the default retrieval path currently uses text search.
+- `VectorSearch` can be injected. Stored vectors are reused when available; retrieval degrades to local text search when embedding or vector search is unavailable.
 - `InsightTree` is built on demand for now and is expected to evolve toward dirty-flag based incremental refresh.
 - `OpenAiClient` is an OpenAI-compatible adapter. In production, host apps should manage API keys, proxy settings, retries, log redaction, and network policy.
 
