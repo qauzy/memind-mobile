@@ -37,3 +37,4 @@
 | 2026-05-27 | 显式设置 core 模块发布坐标 | 修正本地 Maven 仓库产物从 `unspecified` 变为 PokeClaw 易引入的 `com.memind.mobile:memind-mobile-core:0.1.0` | 初次发布发现坐标不正确；修正后待重新发布 |
 | 2026-05-27 | 重新发布 release 产物 | 用正确坐标重新生成 AAR、本地 Maven POM 和 Gradle module metadata | `:memind-mobile-core:clean :memind-mobile-core:publishReleasePublicationToLocalBuildRepository` 构建成功 |
 | 2026-05-27 | 新增 `README.md` | 用开源项目常见结构介绍项目定位、核心思想、架构、编译发布方式和基础使用示例 | 已尝试运行 `:memind-mobile-core:test`；失败原因是本机 Gradle 7.5.1 低于 Android Gradle Plugin 8.7.3 要求的 8.9 |
+| 2026-05-27 | 拆分 README 中英文版本 | 将默认 `README.md` 改为英文版，并新增 `README.zh-CN.md` 保留中文说明 | 已检查中英文入口链接与默认 README 语言；本次为文档变更，未重新运行构建 |
