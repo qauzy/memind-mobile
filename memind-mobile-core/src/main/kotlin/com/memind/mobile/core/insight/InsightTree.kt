@@ -15,6 +15,11 @@ public data class InsightTree(
 
     public val roots: List<InsightNode> get() = nodes.filter { it.tier == InsightTier.ROOT }
 
+    /**
+     * 将 Insight Tree 格式化为可读文本。
+     *
+     * 返回 leaf、branch、root 三层结构，方便调试或注入 prompt。
+     */
     public fun toDisplayString(): String = buildString {
         appendLine("=== Insight Tree ===")
         appendLine("Memory: ${memoryId.toIdentifier()}")
@@ -37,6 +42,11 @@ public data class InsightTree(
     }
 
     public companion object {
+        /**
+         * 创建空 Insight Tree。
+         *
+         * memoryId 用于保留记忆空间归属，nodes 默认为空。
+         */
         public fun empty(memoryId: MemoryId): InsightTree = InsightTree(memoryId)
     }
 }
