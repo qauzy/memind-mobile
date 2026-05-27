@@ -48,6 +48,23 @@
   - 将 retrieve 扩展为 keyword + vector + RRF 的 Simple hybrid 策略。
   - 为 rawData/insight tier 预留检索合并入口。
 
+### 构建拆分：默认 Kotlin/JVM core + store-json
+- **状态：** complete
+- 执行的操作：
+  - `settings.gradle.kts` 默认只 include `:memind-mobile-core` 和 `:memind-store-json`。
+  - `memind-mobile-core` 改为 Kotlin/JVM jar 模块，并从默认 source set 排除 `store/room` 源码。
+  - 新增 `memind-store-json`，用 JSONL 文件实现 `MemoryStore`，覆盖 item、rawData、insight、buffer 基础路径。
+  - 为需要 JSON 持久化的数据模型补充 kotlinx.serialization 注解。
+  - README 中英文版本改为说明默认 Android-free 构建和 JAR 产物。
+
+### 可选 SQLite 持久化模块
+- **状态：** complete
+- 执行的操作：
+  - 新增 `memind-store-sqlite` Kotlin/JVM 模块。
+  - 新增 `SqliteStore`，基于 `org.xerial:sqlite-jdbc` 实现 `MemoryStore`。
+  - SQLite 模块不进入默认构建；仅当传入 `-Pmemind.includeSqlite=true` 时 include。
+  - 补充 SQLite store 的 item、rawData、insight、buffer 基础契约测试。
+
 ## 测试结果
 | 测试 | 输入 | 预期结果 | 实际结果 | 状态 |
 |------|------|---------|---------|------|
@@ -59,6 +76,10 @@
 | `./gradlew :memind-mobile-core:test` | KSP + AGP 9 built-in Kotlin 适配 | 测试执行 | 失败于 KSP 通过 kotlin.sourceSets 添加生成目录；AGP 提示可设置 `android.disallowKotlinSourceSets=false` 兼容 | 修复中 |
 | `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` | PokeClaw 构建系统对齐后完整验证 | 单元测试执行 | BUILD SUCCESSFUL，17 个任务执行 | 通过 |
 | `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` | 阶段 4 LLM JSON、时间解析、语义去重变更 | 单元测试执行 | BUILD SUCCESSFUL，17 个任务执行 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` | 默认 core + store-json 构建 | 不设置 `ANDROID_HOME`，构建两个 JVM 模块 | BUILD SUCCESSFUL，执行 core/store-json 编译与测试，不触发 Android SDK 检查 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository :memind-store-json:publishReleasePublicationToLocalBuildRepository` | 默认模块本地 Maven 发布 | 不设置 `ANDROID_HOME`，发布两个 JVM 模块 | BUILD SUCCESSFUL，生成 core/store-json 的本地 Maven 产物 | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` | 新增 SQLite 可选模块后默认构建验证 | 默认不传 SQLite 开关 | BUILD SUCCESSFUL，只执行 core/store-json，不编译 SQLite | 通过 |
+| `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test :memind-store-sqlite:publishReleasePublicationToLocalBuildRepository` | SQLite 可选模块验证 | 显式 include SQLite store，运行测试并发布本地 Maven 产物 | BUILD SUCCESSFUL，SQLite store 单元测试和本地发布通过 | 通过 |
 
 ## 错误日志
 | 时间戳 | 错误 | 尝试次数 | 解决方案 |
@@ -73,15 +94,18 @@
 | 2026-05-27 | 移除 Kotlin Android 插件后运行 `./gradlew :memind-mobile-core:test`，失败于 kapt 不兼容 AGP 9 built-in Kotlin | 1 | 将 Room compiler 从 kapt 迁移到 KSP `2.1.21-2.0.2` |
 | 2026-05-27 | 迁移 KSP 后运行 `./gradlew :memind-mobile-core:test`，失败于 AGP 9 默认禁止 kotlin.sourceSets 添加 KSP 生成目录 | 1 | 按 AGP 错误建议设置 `android.disallowKotlinSourceSets=false` |
 | 2026-05-27 | 设置 KSP/AGP 兼容属性后运行 test，失败于本仓库没有 Android SDK 路径 | 1 | 使用 PokeClaw 同一 SDK 路径设置 `ANDROID_HOME=/Users/gauss/Library/Android/sdk` 后测试通过 |
+| 2026-05-27 | 默认 JVM 构建初次运行失败于本机找不到 Java 17 toolchain | 1 | 模块 toolchain 对齐 Java 21，Java/Kotlin target 仍固定为 JVM 17 |
+| 2026-05-27 | Java toolchain 改为 21 后，Java/Kotlin target 不一致 | 1 | 显式设置 `sourceCompatibility` 和 `targetCompatibility` 为 Java 17 |
+| 2026-05-27 | SQLite 模块初版被加入默认 settings，不符合“类似 Room 可选编译”的要求 | 1 | 改为通过 `-Pmemind.includeSqlite=true` 条件 include，默认构建不包含 SQLite |
 
 ## 五问重启检查
 | 问题 | 答案 |
 |------|------|
-| 我在哪里？ | 阶段 4 已完成，进入阶段 5 前 |
+| 我在哪里？ | 阶段 4 已完成；默认构建已拆为 Android-free core + store-json；进入阶段 5 前 |
 | 我要去哪里？ | 阶段 5：混合检索与上下文接口 |
 | 目标是什么？ | 完善 `memind-mobile`，在移动性能约束下接近原版 Memind 核心记忆能力 |
 | 我学到了什么？ | 见 `.planning/memind_mobile_core/findings.md` |
-| 我做了什么？ | 完成阶段 2/3，完成阶段 4 的 LLM JSON extractor、规则 fallback、时间解析、hash/语义去重和 foresight 开关 |
+| 我做了什么？ | 完成阶段 2/3，完成阶段 4 的 LLM JSON extractor、规则 fallback、时间解析、hash/语义去重和 foresight 开关；完成默认 JVM core + JSON store 构建拆分 |
 
 ---
 *每个阶段完成后或遇到错误时更新此文件*

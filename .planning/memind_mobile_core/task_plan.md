@@ -1,13 +1,13 @@
 # 任务计划：完善 memind-mobile 核心记忆系统
 
 ## 目标
-在 Android 可嵌入、移动设备资源受限的前提下，让 `memind-mobile` 尽量接近原版 Memind 的核心思想：对话缓冲、结构化记忆抽取、分层检索、Insight Tree 演化，以及可直接给宿主 App 使用的上下文接口。
+在可嵌入、资源受限的前提下，让 `memind-mobile` 尽量接近原版 Memind 的核心思想：对话缓冲、结构化记忆抽取、分层检索、Insight Tree 演化，以及可直接给宿主 App 使用的上下文接口。默认构建以通用 Kotlin/JVM core + JSON store 为主，Android/Room 作为可选扩展方向。
 
 ## 当前阶段
 阶段 5
 
 ## 总体原则
-- 保持 `memind-mobile-core` 为无 UI、可 AAR 集成的 Kotlin 库。
+- 保持 `memind-mobile-core` 为无 UI、可 JAR 集成的 Kotlin/JVM 核心库。
 - 原版能力按“核心收益 / 移动成本”分层迁移，优先实现高收益低成本路径。
 - 默认提供本地轻量能力，远程 LLM/Embedding 作为可插拔增强。
 - 所有后台任务必须可控：支持超时、取消、低电量/离线降级、批处理和手动 flush。
@@ -28,6 +28,8 @@
 - [x] 新增 USER 与 AGENT 分类：profile、behavior、event、tool、directive、playbook、resolution
 - [x] 实现 `RoomStore`，覆盖 items、raw_data、insights、buffers、vectors 元数据
 - [x] 保留 `InMemoryStore` 作为测试和临时模式
+- [x] 新增 `JsonFileStore` 作为默认 Android-free 持久化模块
+- [x] 新增 `SqliteStore` 作为显式开关启用的可选 Kotlin/JVM 持久化模块
 - **状态：** complete
 
 ### 阶段 3：对话缓冲与 commit 语义
@@ -99,7 +101,7 @@
 - USER/AGENT 双 scope
 - 七类 category
 - hybrid retrieval
-- Room 持久化
+- JSON 持久化默认可用，Room 作为可选 Android 扩展
 - LLM extractor 可选
 
 ### M3：Insight Tree 可用
@@ -115,7 +117,7 @@
 
 ## 关键问题
 1. 宿主 App 是否允许默认联网调用 LLM/Embedding，还是必须默认离线？
-2. Room 是否作为默认生产存储，还是保持 `InMemoryStore` 默认、Room 由宿主显式注入？
+2. JSON store 是否足够作为默认轻量持久化，还是需要尽快补独立 SQLite store？
 3. Insight Tree 是实时可见优先，还是电量/性能优先，默认延迟构建？
 4. 是否需要保持和原版 HTTP/MCP 请求字段近似兼容，方便以后同步服务端？
 

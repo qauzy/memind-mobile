@@ -2,19 +2,23 @@
 
 [English](README.md)
 
-Memind Mobile 是一个面向 Android App 嵌入的轻量记忆系统核心库。它把原本偏服务端的 Memind 核心能力重新整理为移动端可直接调用的 Kotlin/Android Library，宿主 App 不需要引入 Spring、JDBC 或服务端运行时，就可以在本地保存、检索和组织用户与 Agent 的长期记忆。
+Memind Mobile 是一个适合嵌入 Agent 和 App 的轻量记忆系统库。它把偏服务端的 Memind 核心能力整理成小型 Kotlin/JVM 模块，可以用于 Android、桌面 JVM、命令行工具或测试环境，不要求 Spring、JDBC、Android SDK 或服务端运行时。
 
-当前仓库的核心交付物是 `memind-mobile-core`：一个无 UI 的 Android AAR 模块，提供统一的 `Memory` API、可替换的存储层、轻量文本检索、Room 本地持久化和 OpenAI 兼容模型客户端。
+默认构建只产出两个不依赖 Android 的 JAR 模块：
+
+- `memind-mobile-core`：核心 `Memory` API、数据模型、抽取 pipeline、检索接口、内存存储和 OpenAI 兼容客户端。
+- `memind-store-json`：基于 JSONL 文件的简单持久化模块，实现 `MemoryStore`。
+
+可选持久化模块不在默认构建路径里。`memind-store-sqlite` 可以通过显式 Gradle 属性编译；Room/Android 持久化后续也可以作为独立可选 Android 模块重新接入。
 
 ## 核心思想
 
-Memind Mobile 的设计目标是让移动端 Agent 拥有“可落地、可裁剪、可替换”的长期记忆能力：
-
-- **移动端优先**：核心库以 Android AAR 形式交付，使用 Kotlin coroutine、Room、OkHttp 和 kotlinx.serialization，避免引入服务端框架。
-- **纯 API 嵌入**：宿主 App 通过 `Memory.builder()` 组装依赖，然后直接调用 `addMessage`、`extract`、`retrieve`、`getInsightTree` 等函数。
-- **记忆空间隔离**：使用 `MemoryId(userId, agentId)` 隔离不同用户和不同 Agent 的记忆，适合多账号、多 Agent 或多角色场景。
-- **分层数据模型**：同时保留原始输入 `RawData`、可检索事实 `MemoryItem` 和可视化/归纳用的 `InsightTree`，为后续语义检索和记忆整理留出扩展空间。
-- **可替换组件**：`ChatClient`、`MemoryStore`、`TextSearch`、`VectorSearch` 都是接口，默认实现轻量可用，宿主 App 可以替换成自己的模型、数据库或检索实现。
+- **小核心优先**：核心记忆引擎是 Kotlin/JVM JAR，可以脱离 Android 工具链运行。
+- **纯 API 嵌入**：宿主 App 通过 `Memory.builder()` 组装依赖，然后直接调用 `addMessage`、`extract`、`commit`、`retrieve`、`getInsightTree` 等函数。
+- **记忆空间隔离**：使用 `MemoryId(userId, agentId)` 隔离不同用户、Agent 和角色。
+- **分层数据模型**：同时保留原始输入 `RawData`、可检索事实 `MemoryItem` 和归纳结构 `InsightTree`。
+- **可替换组件**：`ChatClient`、`MemoryStore`、`TextSearch`、`VectorSearch` 都是接口，宿主可以替换成自己的模型、数据库或检索实现。
+- **默认离线可用**：规则抽取、内存存储和 JSONL 持久化都不依赖远程模型服务。
 
 ## 项目结构
 
@@ -23,32 +27,40 @@ memind-mobile/
 ├── build.gradle.kts
 ├── settings.gradle.kts
 ├── gradle.properties
-├── AGENT.md
-├── TASK_PLAN.md
 ├── README.md
 ├── README.zh-CN.md
-└── memind-mobile-core/
+├── memind-mobile-core/
+│   ├── build.gradle.kts
+│   └── src/
+│       ├── main/kotlin/com/memind/mobile/core/
+│       │   ├── Memory.kt                 # 对外核心 API
+│       │   ├── MemoryBuilder.kt          # 依赖组装入口
+│       │   ├── DefaultMemory.kt          # 默认实现
+│       │   ├── extract/                  # 规则/LLM 抽取与去重
+│       │   ├── llm/                      # ChatClient 与 OpenAI 兼容客户端
+│       │   ├── model/                    # MemoryId、Message、检索/抽取模型
+│       │   ├── search/                   # 文本检索与向量检索接口
+│       │   ├── store/                    # 存储接口与内存实现
+│       │   └── insight/                  # Insight Tree 结构与构建
+│       └── test/kotlin/com/memind/mobile/core/
+└── memind-store-json/
     ├── build.gradle.kts
-    ├── consumer-rules.pro
     └── src/
-        ├── main/kotlin/com/memind/mobile/core/
-        │   ├── Memory.kt                 # 对外核心 API
-        │   ├── MemoryBuilder.kt          # 依赖组装入口
-        │   ├── DefaultMemory.kt          # 默认实现
-        │   ├── llm/                      # ChatClient 与 OpenAI 兼容客户端
-        │   ├── model/                    # MemoryId、Message、检索/抽取结果等模型
-        │   ├── search/                   # 文本检索与向量检索接口
-        │   ├── store/                    # 记忆存储接口与内存实现
-        │   ├── store/room/               # Room/SQLite 持久化实现
-        │   └── insight/                  # Insight Tree 构建与结构
-        └── test/kotlin/com/memind/mobile/core/
-            └── MemoryTest.kt
+        ├── main/kotlin/com/memind/mobile/store/json/
+        │   └── JsonFileStore.kt          # JSONL MemoryStore 实现
+        └── test/kotlin/com/memind/mobile/store/json/
+└── memind-store-sqlite/
+    ├── build.gradle.kts
+    └── src/
+        ├── main/kotlin/com/memind/mobile/store/sqlite/
+        │   └── SqliteStore.kt            # 可选 JVM SQLite MemoryStore
+        └── test/kotlin/com/memind/mobile/store/sqlite/
 ```
 
 ## 架构概览
 
 ```text
-Host Android App
+Host App or Agent
         |
         v
 Memory API
@@ -65,7 +77,9 @@ Memory API
         v                    v
 MemoryStore              Search
   - InMemoryStore          - SimpleTextSearch
-  - RoomStore              - VectorSearch interface
+  - JsonFileStore          - VectorSearch interface
+  - SqliteStore
+  - custom store
         |
         v
 RawData / MemoryItem / InsightNode
@@ -80,92 +94,120 @@ ChatClient
 
 核心调用链可以理解为：
 
-1. 宿主 App 用 `MemoryId` 指定一个记忆空间。
-2. `addMessage` 或 `extract` 写入原始内容，并生成可检索的 `MemoryItem`。
-3. `MemoryStore` 负责保存数据，默认可用内存存储，也可以使用 `RoomStore` 持久化到 SQLite。
-4. `TextSearch` 负责轻量关键词召回，后续可通过 `VectorSearch` 扩展语义召回。
-5. `getInsightTree` 从已有记忆构建轻量 Insight Tree，供 UI 或调试面板展示。
+1. 宿主用 `MemoryId` 指定一个记忆空间。
+2. `addMessage` 把消息写入 pending/recent buffer。
+3. `commit` 把 pending 消息整理为 `RawData` 和抽取后的 `MemoryItem`。
+4. `MemoryStore` 通过 `InMemoryStore`、`JsonFileStore` 或自定义实现持久化。
+5. `retrieve` 当前执行轻量本地召回，`VectorSearch` 作为后续语义检索扩展点。
+6. `getInsightTree` 从已有记忆构建轻量树结构，供 UI、调试或检查使用。
 
 ## 当前能力
 
-- Android Library 模块：`com.memind.mobile.core`
-- Kotlin 2.1.0，JVM target 17
-- Android Gradle Plugin 8.7.3
-- compileSdk 36.1，minSdk 21
+- Kotlin/JVM 核心库，JVM target 17
+- Gradle Wrapper 9.3.1、Kotlin 2.1.21、Daemon JVM 21
+- 默认构建不需要 Android SDK
 - 支持内存存储 `InMemoryStore`
-- 支持 Room 本地持久化 `RoomStore`
+- 支持 JSONL 文件持久化 `JsonFileStore`
+- 支持可选 SQLite 文件持久化 `SqliteStore`
 - 支持 OpenAI 兼容接口 `OpenAiClient`
+- 支持规则抽取 fallback 和可选 LLM JSON 抽取
+- 支持精确 hash 去重和可选语义去重扩展点
 - 支持基础文本检索 `SimpleTextSearch`
 - 支持 USER/AGENT scope 与记忆分类过滤
-- 支持发布 release AAR 与本地 Maven 仓库产物
+- 支持两个默认模块发布到本地 Maven 仓库
 
 ## 环境要求
 
-- JDK 17
-- Android SDK，并安装 compileSdk 36.1
-- Gradle 9.3.1 或更高版本
+- JDK 21，用于 Gradle daemon 和编译 toolchain
+- 默认构建不需要 Android SDK
 
-当前仓库已加入与 PokeClaw 对齐的 Gradle Wrapper，本地构建优先使用 `./gradlew`。项目使用 Android Gradle Plugin 9.1.0、Kotlin 2.1.21 和 Gradle 9.3.1。
+生成的字节码目标是 JVM 17。建议始终使用仓库内 Gradle Wrapper：
+
+```bash
+./gradlew --version
+```
 
 ## 编译与测试
 
-在仓库根目录执行：
+在仓库根目录构建默认模块：
 
 ```bash
-./gradlew :memind-mobile-core:assembleRelease
+./gradlew build
 ```
 
-运行单元测试：
+运行模块测试：
 
 ```bash
-./gradlew :memind-mobile-core:test
+./gradlew :memind-mobile-core:test :memind-store-json:test
 ```
 
-清理并重新构建：
+只构建 JAR：
 
 ```bash
-./gradlew :memind-mobile-core:clean :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:jar :memind-store-json:jar
 ```
 
-生成 release AAR 后，产物位于：
+生成的 JAR 位于：
 
 ```text
-memind-mobile-core/build/outputs/aar/memind-mobile-core-release.aar
+memind-mobile-core/build/libs/
+memind-store-json/build/libs/
+```
+
+编译或测试可选 SQLite store：
+
+```bash
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:jar
 ```
 
 ## 发布到本地 Maven 仓库
 
-项目已配置 `maven-publish`，可以把 `memind-mobile-core` 发布到模块构建目录下的本地 Maven 仓库：
+两个模块都配置了 `maven-publish`，会发布到各自模块的 build 仓库：
 
 ```bash
-./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository \
+          :memind-store-json:publishReleasePublicationToLocalBuildRepository
 ```
 
-发布后的坐标为：
+发布坐标：
 
 ```text
 com.memind.mobile:memind-mobile-core:0.1.0
+com.memind.mobile:memind-store-json:0.1.0
 ```
 
-仓库路径为：
+发布可选 SQLite 模块：
+
+```bash
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:publishReleasePublicationToLocalBuildRepository
+```
+
+SQLite 坐标：
+
+```text
+com.memind.mobile:memind-store-sqlite:0.1.0
+```
+
+仓库路径：
 
 ```text
 memind-mobile-core/build/repo
+memind-store-json/build/repo
 ```
 
 宿主项目可以这样引入：
 
 ```kotlin
 repositories {
-    maven {
-        url = uri("/path/to/memind-mobile/memind-mobile-core/build/repo")
-    }
-    google()
+    maven { url = uri("/path/to/memind-mobile/memind-mobile-core/build/repo") }
+    maven { url = uri("/path/to/memind-mobile/memind-store-json/build/repo") }
     mavenCentral()
 }
 
 dependencies {
     implementation("com.memind.mobile:memind-mobile-core:0.1.0")
+    implementation("com.memind.mobile:memind-store-json:0.1.0")
 }
 ```
 
@@ -176,6 +218,8 @@ dependencies {
 ```kotlin
 import com.memind.mobile.core.Memory
 import com.memind.mobile.core.llm.OpenAiClient
+import com.memind.mobile.store.json.JsonFileStore
+import java.nio.file.Paths
 
 val memory = Memory.builder()
     .chatClient(
@@ -184,10 +228,11 @@ val memory = Memory.builder()
             baseUrl = "https://api.openai.com",
         ),
     )
+    .store(JsonFileStore(Paths.get("memind-data")))
     .build()
 ```
 
-如果你不希望核心库直接访问远程模型，可以实现自己的 `ChatClient`：
+如果不希望核心库直接访问远程模型，可以实现自己的 `ChatClient`：
 
 ```kotlin
 import com.memind.mobile.core.llm.ChatClient
@@ -221,6 +266,8 @@ memory.addMessage(
     message = Message.user("我喜欢周末去山里徒步。"),
 )
 
+memory.commit(memoryId)
+
 val result = memory.retrieve(
     id = memoryId,
     query = "徒步",
@@ -237,53 +284,22 @@ result.items.forEach { item ->
 ```kotlin
 val extraction = memory.extract(
     id = memoryId,
-    content = "用户正在把 Kotlin 项目迁移到移动端。",
+    content = "用户正在把 Kotlin 项目迁移到可移植 JVM 核心。",
 )
 
 println(extraction.itemIds)
 ```
 
-### 4. 使用 Room 持久化
-
-```kotlin
-import com.memind.mobile.core.Memory
-import com.memind.mobile.core.store.room.RoomStore
-
-val memory = Memory.builder()
-    .chatClient(AppChatClient())
-    .store(RoomStore.create(context))
-    .build()
-```
-
-`RoomStore` 默认数据库名为 `memind-mobile.db`，数据保存在宿主 App 私有目录中。
-
-### 5. 按 scope 或分类检索
-
-```kotlin
-import com.memind.mobile.core.model.MemoryCategory
-import com.memind.mobile.core.model.RetrievalRequest
-
-val userMemories = memory.retrieve(
-    RetrievalRequest.userMemory(memoryId, "徒步"),
-)
-
-val eventMemories = memory.retrieve(
-    RetrievalRequest.byCategories(
-        memoryId = memoryId,
-        query = "迁移",
-        categories = setOf(MemoryCategory.EVENT),
-    ),
-)
-```
-
 ## 设计边界
 
-当前版本是移动端核心库的早期实现，重点是稳定 API、轻量本地存储和基础检索。以下能力已经预留接口，但仍在演进中：
+当前版本是可移植核心库的早期实现，重点是稳定 API、默认构建不依赖 Android、轻量本地存储和基础检索。
 
-- `commit` 当前保持接口语义，后续会接入 pending buffer 和批量抽取 pipeline。
+- `JsonFileStore` 适合轻量本地持久化和测试。更大数据量后续应接入独立 SQLite 模块。
+- `SqliteStore` 是可选模块，不进入默认构建。需要时通过 `-Pmemind.includeSqlite=true` 启用。
+- Room 持久化不属于默认构建。未来可以在存在 Android SDK 路径时，用可选 Android 模块提供。
 - `VectorSearch` 已可注入，默认检索路径目前仍以文本检索为主。
-- `InsightTree` 当前按需轻量构建，后续会演进为增量 dirty flag 与后台刷新机制。
-- `OpenAiClient` 是 OpenAI 兼容接口适配器，生产环境建议由宿主 App 自行管理 API Key、代理、重试、日志脱敏和网络策略。
+- `InsightTree` 当前按需构建，后续会演进为 dirty flag 和增量刷新。
+- `OpenAiClient` 是 OpenAI 兼容接口适配器，生产环境建议由宿主自行管理 API Key、代理、重试、日志脱敏和网络策略。
 
 ## 开发命令速查
 
@@ -291,14 +307,17 @@ val eventMemories = memory.retrieve(
 # 查看可用任务
 ./gradlew tasks
 
-# 编译 release AAR
-./gradlew :memind-mobile-core:assembleRelease
+# 构建默认的非 Android 模块
+./gradlew build
 
 # 运行测试
-./gradlew :memind-mobile-core:test
+./gradlew :memind-mobile-core:test :memind-store-json:test
 
-# 发布到模块本地 Maven 仓库
-./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+# 构建 JAR
+./gradlew :memind-mobile-core:jar :memind-store-json:jar
+
+# 测试可选 SQLite store
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test
 ```
 
 ## License

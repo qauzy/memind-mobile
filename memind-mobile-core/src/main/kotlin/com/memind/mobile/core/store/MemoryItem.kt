@@ -4,7 +4,9 @@ import com.memind.mobile.core.model.MemoryCategory
 import com.memind.mobile.core.model.MemoryId
 import com.memind.mobile.core.model.MemoryItemType
 import com.memind.mobile.core.model.MemoryScope
+import kotlinx.serialization.Serializable
 
+@Serializable
 public data class MemoryItem(
     val id: String,
     val memoryId: MemoryId,

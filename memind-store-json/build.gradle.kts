@@ -23,12 +23,6 @@ kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
     }
-    sourceSets {
-        main {
-            // RoomStore 是 Android 专用实现，默认核心 jar 不编译它。
-            kotlin.exclude("**/store/room/**")
-        }
-    }
 }
 
 publishing {
@@ -36,11 +30,11 @@ publishing {
         create<MavenPublication>("release") {
             from(components["java"])
             groupId = project.group.toString()
-            artifactId = "memind-mobile-core"
+            artifactId = "memind-store-json"
             version = project.version.toString()
             pom {
-                name.set("Memind Mobile Core")
-                description.set("Android-free Kotlin/JVM core memory library for mobile and desktop agents.")
+                name.set("Memind JSON Store")
+                description.set("Android-free JSONL persistence module for Memind Mobile Core.")
             }
         }
     }
@@ -53,18 +47,11 @@ publishing {
 }
 
 dependencies {
-    // 协程基础能力。
+    implementation(project(":memind-mobile-core"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-
-    // JSON 序列化能力，用于模型和通用持久化模块。
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
-    // HTTP 客户端，用于 OpenAI 兼容接口访问。
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // 单元测试依赖。
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.1.21")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
-    testImplementation("org.mockito:mockito-core:5.16.0")
 }

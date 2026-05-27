@@ -2,8 +2,10 @@ package com.memind.mobile.core.store
 
 import com.memind.mobile.core.model.MemoryId
 import com.memind.mobile.core.model.Message
+import kotlinx.serialization.Serializable
 import java.util.UUID
 
+@Serializable
 public data class BufferMessage(
     val id: String = UUID.randomUUID().toString(),
     val memoryId: MemoryId,
@@ -19,6 +21,7 @@ public data class BufferMessage(
     public fun toMessage(): Message = message
 }
 
+@Serializable
 public enum class BufferKind {
     PENDING,
     RECENT,

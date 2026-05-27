@@ -2,19 +2,23 @@
 
 [简体中文](README.zh-CN.md)
 
-Memind Mobile is a lightweight memory-system core library designed for embedded Android apps. It reorganizes the server-oriented Memind core into a Kotlin/Android library that can be called directly from a mobile app, without bringing in Spring, JDBC, or a server runtime.
+Memind Mobile is a lightweight, embeddable memory-system library for agents and apps. It reorganizes the server-oriented Memind core into small Kotlin/JVM modules that can be used from Android, desktop JVM, command-line tools, or tests without requiring Spring, JDBC, an Android SDK, or a server runtime.
 
-The main deliverable in this repository is `memind-mobile-core`: a UI-free Android AAR module that provides a unified `Memory` API, replaceable storage, lightweight text retrieval, Room persistence, and an OpenAI-compatible model client.
+The default build produces two Android-free JAR modules:
+
+- `memind-mobile-core`: the core `Memory` API, models, extraction pipeline, retrieval interfaces, in-memory store, and OpenAI-compatible client.
+- `memind-store-json`: a simple JSONL persistence module that implements `MemoryStore` for local files.
+
+Optional persistence modules are kept out of the default build path. `memind-store-sqlite` can be compiled with an explicit Gradle property, and Room/Android persistence can be reintroduced later as a separate optional Android module.
 
 ## Core Ideas
 
-Memind Mobile is built around a simple goal: give mobile agents a long-term memory layer that is practical, small enough to embed, and easy to replace piece by piece.
-
-- **Mobile first**: the core ships as an Android AAR and uses Kotlin coroutines, Room, OkHttp, and kotlinx.serialization instead of server-side frameworks.
-- **Pure API embedding**: host apps assemble dependencies through `Memory.builder()` and call functions such as `addMessage`, `extract`, `retrieve`, and `getInsightTree`.
-- **Isolated memory spaces**: `MemoryId(userId, agentId)` separates memories across users and agents, which fits multi-account, multi-agent, and role-specific scenarios.
+- **Small core first**: the core memory engine is a Kotlin/JVM JAR, so it can run without Android-specific tooling.
+- **Pure API embedding**: host apps assemble dependencies through `Memory.builder()` and call functions such as `addMessage`, `extract`, `commit`, `retrieve`, and `getInsightTree`.
+- **Isolated memory spaces**: `MemoryId(userId, agentId)` separates memories across users, agents, and roles.
 - **Layered memory model**: the library keeps original inputs as `RawData`, searchable facts as `MemoryItem`, and summarized structures as `InsightTree`.
-- **Replaceable components**: `ChatClient`, `MemoryStore`, `TextSearch`, and `VectorSearch` are interfaces. The default implementations are lightweight, while host apps can inject their own model, database, or retrieval layer.
+- **Replaceable components**: `ChatClient`, `MemoryStore`, `TextSearch`, and `VectorSearch` are interfaces. Apps can swap in their own model client, storage backend, or retrieval layer.
+- **Offline-friendly defaults**: rule-based extraction and in-memory or JSONL storage work without a network model service.
 
 ## Project Structure
 
@@ -23,32 +27,40 @@ memind-mobile/
 ├── build.gradle.kts
 ├── settings.gradle.kts
 ├── gradle.properties
-├── AGENT.md
-├── TASK_PLAN.md
 ├── README.md
 ├── README.zh-CN.md
-└── memind-mobile-core/
+├── memind-mobile-core/
+│   ├── build.gradle.kts
+│   └── src/
+│       ├── main/kotlin/com/memind/mobile/core/
+│       │   ├── Memory.kt                 # Public core API
+│       │   ├── MemoryBuilder.kt          # Dependency assembly entry point
+│       │   ├── DefaultMemory.kt          # Default implementation
+│       │   ├── extract/                  # Rule/LLM extraction and dedup
+│       │   ├── llm/                      # ChatClient and OpenAI-compatible client
+│       │   ├── model/                    # MemoryId, Message, retrieval/extraction models
+│       │   ├── search/                   # Text and vector retrieval interfaces
+│       │   ├── store/                    # Store interface and in-memory implementation
+│       │   └── insight/                  # Insight Tree structures and builder
+│       └── test/kotlin/com/memind/mobile/core/
+└── memind-store-json/
     ├── build.gradle.kts
-    ├── consumer-rules.pro
     └── src/
-        ├── main/kotlin/com/memind/mobile/core/
-        │   ├── Memory.kt                 # Public core API
-        │   ├── MemoryBuilder.kt          # Dependency assembly entry point
-        │   ├── DefaultMemory.kt          # Default implementation
-        │   ├── llm/                      # ChatClient and OpenAI-compatible client
-        │   ├── model/                    # MemoryId, Message, retrieval/extraction models
-        │   ├── search/                   # Text and vector retrieval interfaces
-        │   ├── store/                    # Store interface and in-memory implementation
-        │   ├── store/room/               # Room/SQLite persistence
-        │   └── insight/                  # Insight Tree structures and builder
-        └── test/kotlin/com/memind/mobile/core/
-            └── MemoryTest.kt
+        ├── main/kotlin/com/memind/mobile/store/json/
+        │   └── JsonFileStore.kt          # JSONL MemoryStore implementation
+        └── test/kotlin/com/memind/mobile/store/json/
+└── memind-store-sqlite/
+    ├── build.gradle.kts
+    └── src/
+        ├── main/kotlin/com/memind/mobile/store/sqlite/
+        │   └── SqliteStore.kt            # Optional JVM SQLite MemoryStore
+        └── test/kotlin/com/memind/mobile/store/sqlite/
 ```
 
 ## Architecture
 
 ```text
-Host Android App
+Host App or Agent
         |
         v
 Memory API
@@ -65,7 +77,9 @@ Memory API
         v                    v
 MemoryStore              Search
   - InMemoryStore          - SimpleTextSearch
-  - RoomStore              - VectorSearch interface
+  - JsonFileStore          - VectorSearch interface
+  - SqliteStore
+  - custom store
         |
         v
 RawData / MemoryItem / InsightNode
@@ -81,91 +95,119 @@ ChatClient
 The core flow is:
 
 1. The host app selects a memory space with `MemoryId`.
-2. `addMessage` or `extract` writes the source content and creates searchable `MemoryItem` records.
-3. `MemoryStore` persists data through either `InMemoryStore`, `RoomStore`, or a custom implementation.
-4. `TextSearch` handles lightweight keyword recall. `VectorSearch` is available as an extension point for semantic retrieval.
-5. `getInsightTree` builds a lightweight tree from existing memory items for UI, inspection, or debugging.
+2. `addMessage` writes messages into pending/recent buffers.
+3. `commit` drains pending messages into `RawData` and extracted `MemoryItem` records.
+4. `MemoryStore` persists data through `InMemoryStore`, `JsonFileStore`, or a custom implementation.
+5. `retrieve` performs lightweight local recall today, with `VectorSearch` available as an extension point.
+6. `getInsightTree` builds a lightweight tree from existing memory items for UI, inspection, or debugging.
 
 ## Features
 
-- Android Library module: `com.memind.mobile.core`
-- Kotlin 2.1.0, JVM target 17
-- Android Gradle Plugin 8.7.3
-- compileSdk 36.1, minSdk 21
+- Kotlin/JVM core library, JVM target 17
+- Gradle Wrapper 9.3.1, Kotlin 2.1.21, daemon JVM 21
+- Default build requires no Android SDK
 - In-memory storage with `InMemoryStore`
-- Local Room persistence with `RoomStore`
+- JSONL file persistence with `JsonFileStore`
+- Optional SQLite file persistence with `SqliteStore`
 - OpenAI-compatible client with `OpenAiClient`
+- Rule-based extraction fallback plus optional LLM JSON extraction
+- Exact hash deduplication and optional semantic deduplication hook
 - Basic text retrieval with `SimpleTextSearch`
 - USER/AGENT scope filtering and memory-category filtering
-- Release AAR and local Maven publication support
+- Local Maven publication support for both default modules
 
 ## Requirements
 
-- JDK 17
-- Android SDK with compileSdk 36.1 installed
-- Gradle 9.3.1 or newer
+- JDK 21 for the Gradle daemon and compilation toolchain
+- No Android SDK is required for the default build
 
-This repository includes a Gradle Wrapper aligned with PokeClaw. Prefer `./gradlew` for local builds. The project uses Android Gradle Plugin 9.1.0, Kotlin 2.1.21, and Gradle 9.3.1.
+The generated bytecode targets JVM 17. Use the repository Gradle Wrapper:
+
+```bash
+./gradlew --version
+```
 
 ## Build and Test
 
-Build the release AAR from the repository root:
+Build the default modules from the repository root:
 
 ```bash
-./gradlew :memind-mobile-core:assembleRelease
+./gradlew build
 ```
 
-Run unit tests:
+Run module tests:
 
 ```bash
-./gradlew :memind-mobile-core:test
+./gradlew :memind-mobile-core:test :memind-store-json:test
 ```
 
-Clean and rebuild:
+Build JARs only:
 
 ```bash
-./gradlew :memind-mobile-core:clean :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:jar :memind-store-json:jar
 ```
 
-The generated release AAR is written to:
+Generated JARs are written to:
 
 ```text
-memind-mobile-core/build/outputs/aar/memind-mobile-core-release.aar
+memind-mobile-core/build/libs/
+memind-store-json/build/libs/
+```
+
+Build or test the optional SQLite store:
+
+```bash
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:jar
 ```
 
 ## Publish to a Local Maven Repository
 
-The project is configured with `maven-publish`. Publish `memind-mobile-core` to the module-local Maven repository with:
+Both modules use `maven-publish` and publish to their own module-local build repository:
 
 ```bash
-./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository \
+          :memind-store-json:publishReleasePublicationToLocalBuildRepository
 ```
 
 Published coordinates:
 
 ```text
 com.memind.mobile:memind-mobile-core:0.1.0
+com.memind.mobile:memind-store-json:0.1.0
 ```
 
-Repository path:
+Publish the optional SQLite module with:
+
+```bash
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:publishReleasePublicationToLocalBuildRepository
+```
+
+SQLite coordinates:
+
+```text
+com.memind.mobile:memind-store-sqlite:0.1.0
+```
+
+Repository paths:
 
 ```text
 memind-mobile-core/build/repo
+memind-store-json/build/repo
 ```
 
-A host project can consume it like this:
+A host project can consume them like this:
 
 ```kotlin
 repositories {
-    maven {
-        url = uri("/path/to/memind-mobile/memind-mobile-core/build/repo")
-    }
-    google()
+    maven { url = uri("/path/to/memind-mobile/memind-mobile-core/build/repo") }
+    maven { url = uri("/path/to/memind-mobile/memind-store-json/build/repo") }
     mavenCentral()
 }
 
 dependencies {
     implementation("com.memind.mobile:memind-mobile-core:0.1.0")
+    implementation("com.memind.mobile:memind-store-json:0.1.0")
 }
 ```
 
@@ -176,6 +218,8 @@ dependencies {
 ```kotlin
 import com.memind.mobile.core.Memory
 import com.memind.mobile.core.llm.OpenAiClient
+import com.memind.mobile.store.json.JsonFileStore
+import java.nio.file.Paths
 
 val memory = Memory.builder()
     .chatClient(
@@ -184,6 +228,7 @@ val memory = Memory.builder()
             baseUrl = "https://api.openai.com",
         ),
     )
+    .store(JsonFileStore(Paths.get("memind-data")))
     .build()
 ```
 
@@ -221,6 +266,8 @@ memory.addMessage(
     message = Message.user("I like hiking in the mountains on weekends."),
 )
 
+memory.commit(memoryId)
+
 val result = memory.retrieve(
     id = memoryId,
     query = "hiking",
@@ -237,50 +284,19 @@ result.items.forEach { item ->
 ```kotlin
 val extraction = memory.extract(
     id = memoryId,
-    content = "The user is migrating a Kotlin project to mobile.",
+    content = "The user is migrating a Kotlin project to a portable JVM core.",
 )
 
 println(extraction.itemIds)
 ```
 
-### 4. Use Room Persistence
-
-```kotlin
-import com.memind.mobile.core.Memory
-import com.memind.mobile.core.store.room.RoomStore
-
-val memory = Memory.builder()
-    .chatClient(AppChatClient())
-    .store(RoomStore.create(context))
-    .build()
-```
-
-`RoomStore` uses `memind-mobile.db` by default and stores data in the host app's private storage.
-
-### 5. Retrieve by Scope or Category
-
-```kotlin
-import com.memind.mobile.core.model.MemoryCategory
-import com.memind.mobile.core.model.RetrievalRequest
-
-val userMemories = memory.retrieve(
-    RetrievalRequest.userMemory(memoryId, "hiking"),
-)
-
-val eventMemories = memory.retrieve(
-    RetrievalRequest.byCategories(
-        memoryId = memoryId,
-        query = "migration",
-        categories = setOf(MemoryCategory.EVENT),
-    ),
-)
-```
-
 ## Design Boundaries
 
-This is an early mobile-core implementation. The current focus is stable APIs, lightweight local storage, and basic retrieval. Several extension points are already present but still evolving:
+This is an early portable-core implementation. The current focus is stable APIs, Android-free default builds, lightweight local storage, and basic retrieval.
 
-- `commit` currently preserves the API contract and will later connect to a pending-buffer and batch-extraction pipeline.
+- `JsonFileStore` is intended for light local persistence and tests. Larger datasets should use a dedicated SQLite module later.
+- `SqliteStore` is optional and not included in the default build. Enable it with `-Pmemind.includeSqlite=true`.
+- Room persistence is not part of the default build. A future optional Android module can provide it when an Android SDK path is available.
 - `VectorSearch` can be injected, while the default retrieval path currently uses text search.
 - `InsightTree` is built on demand for now and is expected to evolve toward dirty-flag based incremental refresh.
 - `OpenAiClient` is an OpenAI-compatible adapter. In production, host apps should manage API keys, proxy settings, retries, log redaction, and network policy.
@@ -291,14 +307,17 @@ This is an early mobile-core implementation. The current focus is stable APIs, l
 # List available tasks
 ./gradlew tasks
 
-# Build release AAR
-./gradlew :memind-mobile-core:assembleRelease
+# Build the default Android-free modules
+./gradlew build
 
 # Run tests
-./gradlew :memind-mobile-core:test
+./gradlew :memind-mobile-core:test :memind-store-json:test
 
-# Publish to the module-local Maven repository
-./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+# Build JARs
+./gradlew :memind-mobile-core:jar :memind-store-json:jar
+
+# Test optional SQLite store
+./gradlew -Pmemind.includeSqlite=true :memind-store-sqlite:test
 ```
 
 ## License

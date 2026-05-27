@@ -15,9 +15,13 @@
 - 当前规则 extractor 已支持精确 contentHash 去重；开启 `enableSemanticDedup` 且注入 vectorSearch 后可使用 embedding/vector 做近似去重。
 - 当前已有轻量 `TemporalNormalizer`，支持文本日期、消息时间和 observedAt 回退。
 - 当前 foresight 是可选标记，默认关闭；启用后规则抽取会生成 `MemoryItemType.FORESIGHT`。
+- 当前默认构建只包含 `memind-mobile-core` 和 `memind-store-json` 两个 Kotlin/JVM 模块，不依赖 Android SDK。
+- 当前 `JsonFileStore` 提供 Android-free 的 JSONL 持久化；Room/Android 持久化已从默认构建路径移除，后续可作为可选模块重新接入。
+- 当前新增 `SqliteStore` 作为可选 Kotlin/JVM SQLite 持久化模块，需要 `-Pmemind.includeSqlite=true` 才会 include 和编译。
 - 当前 `retrieve` 只做简单文本匹配，没有 vector、RRF、scope/category 过滤、deep retrieval。
 - 当前 `getInsightTree` 是按 item 文本临时拼装 leaf/branch/root，没有原版 insight point、group、version、flush/scheduler。
-- `RoomStore` 已覆盖 items、raw_data、insights、buffer_messages 和 vector_metadata 的基础表与读写路径。
+- `RoomStore` 源码曾覆盖 items、raw_data、insights、buffer_messages 和 vector_metadata 的基础表与读写路径，但当前默认构建不编译 Android/Room 路径。
+- `JsonFileStore` 已覆盖 item、rawData、insight、buffer 的基础 JSONL 持久化路径，是当前默认持久化模块。
 
 ## 原版核心能力摘要
 - 入口 API 包含 extraction、context、retrieval、deletion、flush/invalidate、memory-thread runtime status。
@@ -38,7 +42,7 @@
 ## 推荐架构
 - `buffer/`：PendingConversationBuffer、RecentConversationBuffer、CommitDetector。
 - `extract/`：MemoryExtractor、RuleBasedExtractor、LlmJsonExtractor、Deduplicator、TemporalNormalizer。
-- `store/`：RoomStore、InMemoryStore、ItemDao、RawDataDao、InsightDao、BufferDao。
+- `store/`：InMemoryStore、MemoryStore 接口；默认持久化由独立 `memind-store-json` 模块提供，RoomStore 后续作为可选 Android store。
 - `retrieval/`：RetrievalRequest、ContextRequest、ContextWindow、HybridRetriever、RrfMerger、Truncator。
 - `insight/`：InsightLayer、InsightGenerator、InsightScheduler、DirtyInsightTracker。
 - `options/`：MemoryBuildOptions、MobilePerformanceOptions。
@@ -61,6 +65,9 @@
 | Insight Tree 使用 dirty flag + flush | 避免 `getInsightTree` 每次全量重建 |
 | graph/thread 延后 | 原版实现复杂，移动收益不如前几项直接 |
 | 构建系统对齐 PokeClaw：Gradle 9.3.1、AGP 9.1.0、Kotlin 2.1.21、compileSdk 36.1、Daemon JVM 21 | 方便 PokeClaw 通过源码模块或本地 Maven 产物集成，减少版本协调成本 |
+| 默认构建只编译 core + store-json | 让基础库成为通用 Kotlin/JVM 产物，避免无 Android SDK 环境下被 Room/AGP 阻塞 |
+| RoomStore 不放在默认 core jar 中编译 | Room 依赖 Android/SQLite/注解处理链路，应作为可选 Android 持久化模块处理 |
+| SQLite store 作为显式开关模块 | 满足更通用的文件数据库持久化需求，同时保持默认构建轻量 |
 
 ## 遇到的问题
 | 问题 | 解决方案 |
@@ -70,6 +77,9 @@
 | 大小写文件名冲突导致根目录 `task_plan.md` 会覆盖 `TASK_PLAN.md` | 使用 `.planning/memind_mobile_core/` 作为 scoped planning 目录 |
 | 当前项目没有 Gradle wrapper，系统 Gradle 无法解析 Android Gradle Plugin 8.7.3 | 本轮先记录验证限制；后续建议补 wrapper 或固定可解析的 AGP/Gradle 组合 |
 | AGP 9 built-in Kotlin 与 kapt 不兼容 | 已迁移 Room compiler 到 KSP，并设置临时兼容属性 `android.disallowKotlinSourceSets=false` |
+| 默认构建不应强制要求 Android SDK | 已将默认 settings 收窄到 `:memind-mobile-core` 与 `:memind-store-json`，core 改为 Kotlin/JVM jar，并排除 Room 源码 |
+| 本机没有 Java 17 toolchain | 使用 PokeClaw 对齐的 Java 21 daemon/toolchain 编译，同时将 Java/Kotlin bytecode target 固定为 JVM 17 |
+| SQLite 不应默认编译进核心 | 已通过 `memind.includeSqlite` Gradle 属性控制 include，默认 `./gradlew build` 不触发 SQLite 模块 |
 
 ## 资源
 - 原版项目：`/opt/code/memind`

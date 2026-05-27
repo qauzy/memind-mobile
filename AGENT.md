@@ -42,3 +42,5 @@
 | 2026-05-27 | 启动阶段 4 抽取 pipeline | 新增 `MemoryExtractor` 和规则 extractor，把直接抽取逻辑从 `DefaultMemory` 拆出，并实现精确 hash 去重 | 已尝试运行 `:memind-mobile-core:test`；失败原因仍是本机 Gradle 7.5.1 低于 AGP 8.7.3 要求的 8.9 |
 | 2026-05-27 | 对齐 PokeClaw 构建系统版本 | 将 Gradle Wrapper/AGP/Kotlin/compileSdk/Daemon JVM 对齐 PokeClaw，并把 Room compiler 从 kapt 迁移到 KSP | 使用 `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` 验证通过 |
 | 2026-05-27 | 完成阶段 4 移动版抽取 pipeline | 新增 LLM JSON extractor、时间解析、语义去重接口和 foresight 开关，并补充相关单元测试 | 使用 `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` 验证通过 |
+| 2026-05-27 | 默认构建拆为 Kotlin/JVM core 与 JSON store | 默认只编译 `memind-mobile-core` 和 `memind-store-json`，新增 JSONL 持久化模块，并让 Room/Android 路径退出默认构建 | 使用 `GRADLE_USER_HOME=/opt/code/memind-mobile/.gradle-build ./gradlew build` 与两个模块本地 Maven publish 验证通过，未设置 `ANDROID_HOME` |
+| 2026-05-27 | 新增可选 SQLite 持久化模块 | 新增 `memind-store-sqlite` 和 `SqliteStore`，通过 `-Pmemind.includeSqlite=true` 显式 include，避免默认编译进核心或默认构建 | 默认 `./gradlew build` 验证只编译 core/store-json；SQLite 模块测试和本地 Maven 发布验证通过 |

@@ -1,8 +1,10 @@
 package com.memind.mobile.core.store
 
 import com.memind.mobile.core.model.MemoryId
+import kotlinx.serialization.Serializable
 import java.util.UUID
 
+@Serializable
 public data class InsightNode(
     val id: String = UUID.randomUUID().toString(),
     val memoryId: MemoryId,
@@ -14,6 +16,7 @@ public data class InsightNode(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+@Serializable
 public enum class InsightTier {
     LEAF,
     BRANCH,
