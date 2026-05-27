@@ -29,3 +29,11 @@
 | 2026-05-27 | 为 `MemoryStore` 接口与单元测试函数补充中文函数头 | 让存储契约和测试入口同样满足函数注释规则 | 未运行构建；仅做注释补充 |
 | 2026-05-27 | 为公共接口、检索实现、Insight 构建和配置模型补齐中文函数头 | 进一步收口“所有新增/修改函数带中文函数头、关键逻辑中文说明”的约束 | 未运行构建；仅做注释和轻量清理，未触碰系统环境 |
 | 2026-05-27 | 更新 core 模块 Gradle 依赖注释 | 将本轮触达的依赖分组说明改为中文，保持关键项目文件注释一致 | 未运行构建；仅做注释补充，未触碰系统环境 |
+| 2026-05-27 | 新增 `.gitignore` | 忽略 Gradle/IDE/构建产物，避免打包生成文件长期处于未跟踪状态 | 未运行构建；仅新增项目忽略规则，未触碰系统环境 |
+| 2026-05-27 | 配置 `memind-mobile-core` 发布 AAR 与本地 Maven 仓库产物 | 面向 `/opt/code/PokeClaw` 集成，输出可携带传递依赖的 Android 库包，并避免要求本机安装 JDK 17 toolchain | 待运行 release publish 构建；仅修改项目构建脚本与 consumer 混淆规则 |
+| 2026-05-27 | 修正本地发布仓库路径类型 | 让 Gradle Kotlin DSL 使用明确的 URI，保证 release publish task 可配置通过 | 首轮构建失败暴露类型不匹配；修正后待重新运行发布构建 |
+| 2026-05-27 | 为项目仓库解析增加国内 Maven 镜像 | 规避 Google Maven TLS 握手失败，保证 Room/AndroidX 依赖可在本项目内解析完成 | 第二轮构建失败于 `room-compiler` 下载；镜像连通性已用 curl HEAD 验证 |
+| 2026-05-27 | 发布 `memind-mobile-core` release AAR 和本地 Maven 仓库产物 | 生成 PokeClaw 可通过 Gradle 引入的 Android 库包，并保留传递依赖元数据 | `:memind-mobile-core:publishReleasePublicationToLocalBuildRepository` 构建成功；产物位于模块 `build/outputs/aar` 和 `build/repo` |
+| 2026-05-27 | 显式设置 core 模块发布坐标 | 修正本地 Maven 仓库产物从 `unspecified` 变为 PokeClaw 易引入的 `com.memind.mobile:memind-mobile-core:0.1.0` | 初次发布发现坐标不正确；修正后待重新发布 |
+| 2026-05-27 | 重新发布 release 产物 | 用正确坐标重新生成 AAR、本地 Maven POM 和 Gradle module metadata | `:memind-mobile-core:clean :memind-mobile-core:publishReleasePublicationToLocalBuildRepository` 构建成功 |
+| 2026-05-27 | 新增 `README.md` | 用开源项目常见结构介绍项目定位、核心思想、架构、编译发布方式和基础使用示例 | 已尝试运行 `:memind-mobile-core:test`；失败原因是本机 Gradle 7.5.1 低于 Android Gradle Plugin 8.7.3 要求的 8.9 |

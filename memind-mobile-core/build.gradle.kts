@@ -1,24 +1,63 @@
+import org.gradle.api.publish.maven.MavenPublication
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jetbrains.kotlin.kapt")
+    id("maven-publish")
 }
+
+group = "com.memind.mobile"
+version = "0.1.0"
 
 android {
     namespace = "com.memind.mobile.core"
     compileSdk = 35
     defaultConfig {
         minSdk = 21
+        consumerProguardFiles("consumer-rules.pro")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
 kotlin {
-    jvmToolchain(17)
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = project.group.toString()
+                artifactId = "memind-mobile-core"
+                version = project.version.toString()
+                pom {
+                    name.set("Memind Mobile Core")
+                    description.set("移动端可嵌入的轻量记忆系统核心库，面向 PokeClaw 等 Android App 集成。")
+                }
+            }
+        }
+        repositories {
+            maven {
+                name = "localBuild"
+                url = layout.buildDirectory.dir("repo").get().asFile.toURI()
+            }
+        }
+    }
 }
 
 dependencies {
