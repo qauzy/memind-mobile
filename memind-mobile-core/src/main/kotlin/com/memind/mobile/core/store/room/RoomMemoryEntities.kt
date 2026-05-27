@@ -8,6 +8,9 @@ import com.memind.mobile.core.model.MemoryId
 import com.memind.mobile.core.model.MemoryItemType
 import com.memind.mobile.core.model.MemoryScope
 import com.memind.mobile.core.model.RawData
+import com.memind.mobile.core.model.Message
+import com.memind.mobile.core.store.BufferKind
+import com.memind.mobile.core.store.BufferMessage
 import com.memind.mobile.core.store.InsightNode
 import com.memind.mobile.core.store.InsightTier
 import com.memind.mobile.core.store.MemoryItem
@@ -266,7 +269,47 @@ internal data class RoomBufferMessageEntity(
     val metadataJson: String,
     val kind: String,
     val createdAt: Long,
-)
+) {
+    /**
+     * 将 Room 缓冲实体转换为领域模型。
+     *
+     * 转换时恢复 Message metadata，保证 sourceClient 等调用方信息能透传到 commit。
+     */
+    fun toModel(): BufferMessage =
+        BufferMessage(
+            id = id,
+            memoryId = MemoryId(userId, agentId),
+            message = Message(
+                role = role,
+                content = content,
+                timestamp = timestamp,
+                metadata = RoomJson.decodeMap(metadataJson),
+            ),
+            kind = runCatching { BufferKind.valueOf(kind) }.getOrDefault(BufferKind.PENDING),
+            createdAt = createdAt,
+        )
+
+    companion object {
+        /**
+         * 将领域缓冲消息转换为 Room 实体。
+         *
+         * memoryKey 冗余保存以便按记忆空间快速读取 pending/recent 缓冲。
+         */
+        fun fromModel(message: BufferMessage): RoomBufferMessageEntity =
+            RoomBufferMessageEntity(
+                id = message.id,
+                memoryKey = message.memoryId.toIdentifier(),
+                userId = message.memoryId.userId,
+                agentId = message.memoryId.agentId,
+                role = message.message.role,
+                content = message.message.content,
+                timestamp = message.message.timestamp,
+                metadataJson = RoomJson.encodeMap(message.message.metadata),
+                kind = message.kind.name,
+                createdAt = message.createdAt,
+            )
+    }
+}
 
 @Entity(
     tableName = "vector_metadata",

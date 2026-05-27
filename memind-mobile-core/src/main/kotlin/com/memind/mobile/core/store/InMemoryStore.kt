@@ -12,6 +12,7 @@ public class InMemoryStore : MemoryStore {
     private val items = mutableMapOf<String, LinkedHashMap<String, MemoryItem>>()
     private val insights = mutableMapOf<String, MutableList<InsightNode>>()
     private val rawData = mutableMapOf<String, LinkedHashMap<String, RawData>>()
+    private val bufferMessages = mutableMapOf<String, MutableList<BufferMessage>>()
     private val rebuildFlags = mutableMapOf<String, String>()
     private val mutex = Mutex()
 
@@ -222,6 +223,66 @@ public class InMemoryStore : MemoryStore {
     }
 
     /**
+     * 保存缓冲消息。
+     *
+     * 使用 memoryId 和 kind 组合成内部 key，保证 pending/recent 互不影响。
+     */
+    override suspend fun saveBufferMessage(message: BufferMessage): String {
+        mutex.withLock {
+            bufferMessages.getOrPut(bufferKey(message.memoryId, message.kind)) { mutableListOf() }
+                .add(message)
+        }
+        return message.id
+    }
+
+    /**
+     * 读取缓冲消息。
+     *
+     * 内存实现按 createdAt 升序返回，和 RoomStore 行为保持一致。
+     */
+    override suspend fun getBufferMessages(
+        memoryId: MemoryId,
+        kind: BufferKind,
+        limit: Int,
+    ): List<BufferMessage> {
+        mutex.withLock {
+            return bufferMessages[bufferKey(memoryId, kind)]
+                ?.sortedBy { it.createdAt }
+                ?.take(limit)
+                ?: emptyList()
+        }
+    }
+
+    /**
+     * 清空缓冲消息。
+     *
+     * 返回清理数量，方便 commit 路径做调试和测试断言。
+     */
+    override suspend fun clearBuffer(memoryId: MemoryId, kind: BufferKind): Int {
+        mutex.withLock {
+            return bufferMessages.remove(bufferKey(memoryId, kind))?.size ?: 0
+        }
+    }
+
+    /**
+     * 裁剪缓冲消息。
+     *
+     * 仅保留最近 maxMessages 条，超过部分从列表头部移除。
+     */
+    override suspend fun trimBuffer(memoryId: MemoryId, kind: BufferKind, maxMessages: Int): Int {
+        mutex.withLock {
+            if (maxMessages < 0) return 0
+            val key = bufferKey(memoryId, kind)
+            val entries = bufferMessages[key] ?: return 0
+            val sorted = entries.sortedBy { it.createdAt }
+            val retained = sorted.takeLast(maxMessages)
+            val removed = entries.size - retained.size
+            bufferMessages[key] = retained.toMutableList()
+            return removed
+        }
+    }
+
+    /**
      * 标记当前记忆空间需要重建派生结构。
      *
      * 阶段 2 仅记录原因；后续 Insight/Thread 阶段会消费该标记。
@@ -231,4 +292,12 @@ public class InMemoryStore : MemoryStore {
             rebuildFlags[memoryId.toIdentifier()] = reason
         }
     }
+
+    /**
+     * 生成缓冲区内部 key。
+     *
+     * 将 kind 纳入 key 可以复用同一张内存表保存 pending 和 recent。
+     */
+    private fun bufferKey(memoryId: MemoryId, kind: BufferKind): String =
+        "${memoryId.toIdentifier()}:${kind.name}"
 }

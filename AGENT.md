@@ -38,3 +38,7 @@
 | 2026-05-27 | 重新发布 release 产物 | 用正确坐标重新生成 AAR、本地 Maven POM 和 Gradle module metadata | `:memind-mobile-core:clean :memind-mobile-core:publishReleasePublicationToLocalBuildRepository` 构建成功 |
 | 2026-05-27 | 新增 `README.md` | 用开源项目常见结构介绍项目定位、核心思想、架构、编译发布方式和基础使用示例 | 已尝试运行 `:memind-mobile-core:test`；失败原因是本机 Gradle 7.5.1 低于 Android Gradle Plugin 8.7.3 要求的 8.9 |
 | 2026-05-27 | 拆分 README 中英文版本 | 将默认 `README.md` 改为英文版，并新增 `README.zh-CN.md` 保留中文说明 | 已检查中英文入口链接与默认 README 语言；本次为文档变更，未重新运行构建 |
+| 2026-05-27 | 实现阶段 3 对话缓冲与 commit 语义 | 新增 pending/recent buffer、缓冲存储读写、本地边界检测，并让 `commit` 生成对话段 RawData/MemoryItem | 已尝试运行 `:memind-mobile-core:test`；失败原因仍是本机 Gradle 7.5.1 低于 AGP 8.7.3 要求的 8.9 |
+| 2026-05-27 | 启动阶段 4 抽取 pipeline | 新增 `MemoryExtractor` 和规则 extractor，把直接抽取逻辑从 `DefaultMemory` 拆出，并实现精确 hash 去重 | 已尝试运行 `:memind-mobile-core:test`；失败原因仍是本机 Gradle 7.5.1 低于 AGP 8.7.3 要求的 8.9 |
+| 2026-05-27 | 对齐 PokeClaw 构建系统版本 | 将 Gradle Wrapper/AGP/Kotlin/compileSdk/Daemon JVM 对齐 PokeClaw，并把 Room compiler 从 kapt 迁移到 KSP | 使用 `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` 验证通过 |
+| 2026-05-27 | 完成阶段 4 移动版抽取 pipeline | 新增 LLM JSON extractor、时间解析、语义去重接口和 foresight 开关，并补充相关单元测试 | 使用 `ANDROID_HOME=/Users/gauss/Library/Android/sdk GRADLE_USER_HOME=.gradle-build ./gradlew :memind-mobile-core:test` 验证通过 |

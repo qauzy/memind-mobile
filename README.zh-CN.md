@@ -91,7 +91,7 @@ ChatClient
 - Android Library 模块：`com.memind.mobile.core`
 - Kotlin 2.1.0，JVM target 17
 - Android Gradle Plugin 8.7.3
-- compileSdk 35，minSdk 21
+- compileSdk 36.1，minSdk 21
 - 支持内存存储 `InMemoryStore`
 - 支持 Room 本地持久化 `RoomStore`
 - 支持 OpenAI 兼容接口 `OpenAiClient`
@@ -102,29 +102,29 @@ ChatClient
 ## 环境要求
 
 - JDK 17
-- Android SDK，并安装 compileSdk 35
-- Gradle 8.9 或更高版本
+- Android SDK，并安装 compileSdk 36.1
+- Gradle 9.3.1 或更高版本
 
-当前仓库没有提交 Gradle Wrapper，因此下面命令默认使用本机 `gradle`。如果后续加入 Wrapper，可以把命令中的 `gradle` 替换为 `./gradlew`。由于项目使用 Android Gradle Plugin 8.7.3，本机 Gradle 版本需要不低于 8.9。
+当前仓库已加入与 PokeClaw 对齐的 Gradle Wrapper，本地构建优先使用 `./gradlew`。项目使用 Android Gradle Plugin 9.1.0、Kotlin 2.1.21 和 Gradle 9.3.1。
 
 ## 编译与测试
 
 在仓库根目录执行：
 
 ```bash
-gradle :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:assembleRelease
 ```
 
 运行单元测试：
 
 ```bash
-gradle :memind-mobile-core:test
+./gradlew :memind-mobile-core:test
 ```
 
 清理并重新构建：
 
 ```bash
-gradle :memind-mobile-core:clean :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:clean :memind-mobile-core:assembleRelease
 ```
 
 生成 release AAR 后，产物位于：
@@ -138,7 +138,7 @@ memind-mobile-core/build/outputs/aar/memind-mobile-core-release.aar
 项目已配置 `maven-publish`，可以把 `memind-mobile-core` 发布到模块构建目录下的本地 Maven 仓库：
 
 ```bash
-gradle :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
 ```
 
 发布后的坐标为：
@@ -289,16 +289,16 @@ val eventMemories = memory.retrieve(
 
 ```bash
 # 查看可用任务
-gradle tasks
+./gradlew tasks
 
 # 编译 release AAR
-gradle :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:assembleRelease
 
 # 运行测试
-gradle :memind-mobile-core:test
+./gradlew :memind-mobile-core:test
 
 # 发布到模块本地 Maven 仓库
-gradle :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
 ```
 
 ## License

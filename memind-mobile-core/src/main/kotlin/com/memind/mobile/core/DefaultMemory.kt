@@ -2,16 +2,23 @@ package com.memind.mobile.core
 
 import com.memind.mobile.core.insight.InsightBuilder
 import com.memind.mobile.core.insight.InsightTree
+import com.memind.mobile.core.buffer.CommitDetector
+import com.memind.mobile.core.buffer.LocalRuleCommitDetector
+import com.memind.mobile.core.buffer.PendingConversationBuffer
+import com.memind.mobile.core.buffer.RecentConversationBuffer
+import com.memind.mobile.core.extract.MemoryExtractor
+import com.memind.mobile.core.extract.LlmJsonMemoryExtractor
+import com.memind.mobile.core.extract.MemoryDeduplicator
+import com.memind.mobile.core.extract.RuleBasedMemoryExtractor
 import com.memind.mobile.core.llm.ChatClient
 import com.memind.mobile.core.model.AddResult
 import com.memind.mobile.core.model.AddStatus
+import com.memind.mobile.core.model.ConversationSegment
 import com.memind.mobile.core.model.ExtractionConfig
 import com.memind.mobile.core.model.ExtractionResult
 import com.memind.mobile.core.model.HealthStatus
-import com.memind.mobile.core.model.MemoryCategory
 import com.memind.mobile.core.model.MemoryId
 import com.memind.mobile.core.model.Message
-import com.memind.mobile.core.model.RawData
 import com.memind.mobile.core.model.RetrievalConfig
 import com.memind.mobile.core.model.RetrievalRequest
 import com.memind.mobile.core.model.RetrievalResult
@@ -20,11 +27,8 @@ import com.memind.mobile.core.model.Strategy
 import com.memind.mobile.core.search.SimpleTextSearch
 import com.memind.mobile.core.search.TextSearch
 import com.memind.mobile.core.search.VectorSearch
-import com.memind.mobile.core.model.MemoryScope
-import com.memind.mobile.core.store.MemoryItem
 import com.memind.mobile.core.store.MemoryStore
 import com.memind.mobile.core.store.InMemoryStore
-import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 public class DefaultMemory(
@@ -33,13 +37,27 @@ public class DefaultMemory(
     private val textSearch: TextSearch = SimpleTextSearch(),
     private val vectorSearch: VectorSearch? = null,
     private val insightBuilder: InsightBuilder = InsightBuilder(store),
+    private val commitDetector: CommitDetector = LocalRuleCommitDetector(),
+    private val extractor: MemoryExtractor = LlmJsonMemoryExtractor(
+        chatClient = chatClient,
+        store = store,
+        textSearch = textSearch,
+        fallback = RuleBasedMemoryExtractor(
+            store = store,
+            textSearch = textSearch,
+            deduplicator = MemoryDeduplicator(store, vectorSearch, chatClient),
+        ),
+        deduplicator = MemoryDeduplicator(store, vectorSearch, chatClient),
+    ),
 ) : Memory {
     private val closed = AtomicBoolean(false)
+    private val pendingBuffer = PendingConversationBuffer(store)
+    private val recentBuffer = RecentConversationBuffer(store)
 
     /**
-     * 添加单条消息到当前记忆空间。
+     * 添加单条消息到当前记忆空间的对话缓冲区。
      *
-     * 现阶段仍采用轻量路径：直接生成结构化 MemoryItem；后续阶段会切换为 pending buffer + commit。
+     * 阶段 3 开始先写 pending/recent buffer，真正的 MemoryItem 由 commit 统一生成。
      */
     override suspend fun addMessage(
         id: MemoryId,
@@ -47,40 +65,34 @@ public class DefaultMemory(
         config: ExtractionConfig,
     ): AddResult {
         if (closed.get()) return AddResult(AddStatus.FAILED, errorMessage = "closed")
-        val now = System.currentTimeMillis()
-        // 先补齐原版 MemoryItem 的核心元数据字段，方便后续抽取 pipeline 无缝替换当前轻量实现。
-        val item = MemoryItem(
-            id = "${id.toIdentifier()}:$now",
-            memoryId = id,
-            text = message.content,
-            scope = config.scope,
-            category = defaultCategory(config.scope),
-            contentType = "message",
-            sourceClient = message.metadata["sourceClient"],
-            source = message.role,
-            contentHash = sha256(message.content),
-            observedAt = message.timestamp,
-            metadata = message.metadata,
-            timestamp = message.timestamp ?: now,
-            createdAt = now,
-        )
-        textSearch.index(id, listOf(item))
-        store.saveItem(item)
-        return AddResult(AddStatus.ACCEPTED)
+        val messageId = pendingBuffer.append(id, message)
+        recentBuffer.append(id, message)
+        val pendingMessages = pendingBuffer.load(id)
+        if (commitDetector.shouldCommit(pendingMessages, message)) {
+            val extraction = commit(id, config)
+            return AddResult(
+                status = if (extraction.isSuccess) AddStatus.EXTRACTED else AddStatus.FAILED,
+                messageId = messageId,
+                rawDataId = extraction.rawDataId,
+                errorMessage = extraction.errorMessage,
+            )
+        }
+        return AddResult(AddStatus.BUFFERED, messageId = messageId)
     }
 
     /**
-     * 批量添加消息到当前记忆空间。
+     * 批量添加消息到当前记忆空间的缓冲区。
      *
-     * 当前按顺序复用单条添加逻辑，确保每条消息都建立独立的元数据和搜索索引。
+     * 当前按顺序复用单条添加逻辑，保持 pending 和 recent 缓冲顺序一致。
      */
     override suspend fun addMessages(
         id: MemoryId,
         messages: List<Message>,
         config: ExtractionConfig,
     ): AddResult {
-        messages.forEach { addMessage(id, it, config) }
-        return AddResult(AddStatus.ACCEPTED)
+        var lastMessageId: String? = null
+        messages.forEach { lastMessageId = addMessage(id, it, config).messageId }
+        return AddResult(AddStatus.BUFFERED, messageId = lastMessageId)
     }
 
     /**
@@ -93,41 +105,13 @@ public class DefaultMemory(
         content: String,
         config: ExtractionConfig,
     ): ExtractionResult {
-        val now = System.currentTimeMillis()
-        val rawData = RawData(
-            memoryId = id,
-            content = content,
-            contentType = "text",
-            createdAt = now,
-        )
-        store.saveRawData(rawData)
-
-        // RawData 保存原始输入，MemoryItem 保存可检索事实；两者用 rawDataId 串联。
-        val item = MemoryItem(
-            id = "${id.toIdentifier()}:$now",
-            memoryId = id,
-            text = content,
-            scope = config.scope,
-            category = defaultCategory(config.scope),
-            contentType = rawData.contentType,
-            rawDataId = rawData.id,
-            contentHash = sha256(content),
-            timestamp = now,
-            createdAt = now,
-        )
-        textSearch.index(id, listOf(item))
-        store.saveItem(item)
-        return ExtractionResult.success(id).copy(
-            rawDataId = rawData.id,
-            itemIds = listOf(item.id),
-            totalMemoryItems = 1,
-        )
+        return extractor.extractText(id, content, config)
     }
 
     /**
      * 提交当前记忆空间的待处理消息。
      *
-     * 阶段 2 仅保留接口语义；阶段 3 会实现 pending buffer drain 和真实抽取。
+     * 会使用默认配置 drain pending buffer，并生成可检索的对话段记忆。
      */
     override suspend fun commit(id: MemoryId): ExtractionResult {
         return commit(id, ExtractionConfig.defaults())
@@ -136,10 +120,19 @@ public class DefaultMemory(
     /**
      * 使用指定抽取配置提交待处理消息。
      *
-     * 当前返回空成功结果，避免提前引入尚未完成的 buffer pipeline。
+     * 当前阶段使用轻量规则抽取：整个 ConversationSegment 保存为 RawData，并生成一个 MemoryItem。
      */
     override suspend fun commit(id: MemoryId, config: ExtractionConfig): ExtractionResult {
-        return ExtractionResult.success(id)
+        if (closed.get()) return ExtractionResult.failed(id, "closed")
+        val messages = pendingBuffer.drain(id)
+        if (messages.isEmpty()) return ExtractionResult.success(id)
+        val segment = ConversationSegment(
+            memoryId = id,
+            messages = messages,
+            sourceClient = messages.firstNotNullOfOrNull { it.metadata["sourceClient"] },
+            metadata = mergeMetadata(messages),
+        )
+        return extractor.extractSegment(segment, config)
     }
 
     /**
@@ -246,20 +239,13 @@ public class DefaultMemory(
     }
 
     /**
-     * 根据 scope 推断默认分类。
+     * 合并消息 metadata。
      *
-     * 在真正 LLM 分类器接入前，USER 默认落到 event，AGENT 默认落到 directive。
+     * 后写入的同名字段覆盖早期字段，便于 sourceClient 等实时消息元数据透传到提交结果。
      */
-    private fun defaultCategory(scope: MemoryScope): MemoryCategory =
-        if (scope == MemoryScope.AGENT) MemoryCategory.DIRECTIVE else MemoryCategory.EVENT
+    private fun mergeMetadata(messages: List<Message>): Map<String, String> =
+        buildMap {
+            messages.forEach { putAll(it.metadata) }
+        }
 
-    /**
-     * 计算文本内容哈希。
-     *
-     * 用于后续 hash 去重和跨存储一致性判断。
-     */
-    private fun sha256(text: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
-    }
 }

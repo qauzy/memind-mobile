@@ -134,6 +134,38 @@ public interface MemoryStore {
     public suspend fun getRawData(memoryId: MemoryId, limit: Int = 50, offset: Int = 0): List<RawData>
 
     /**
+     * 保存一条缓冲消息。
+     *
+     * kind 用于区分 pending 与 recent，支撑阶段 3 的 commit 语义和后续 getContext。
+     */
+    public suspend fun saveBufferMessage(message: BufferMessage): String
+
+    /**
+     * 读取缓冲消息。
+     *
+     * 返回按写入时间升序排列的最多 limit 条消息。
+     */
+    public suspend fun getBufferMessages(
+        memoryId: MemoryId,
+        kind: BufferKind,
+        limit: Int = 50,
+    ): List<BufferMessage>
+
+    /**
+     * 清空指定类型缓冲区。
+     *
+     * commit drain pending buffer 后会调用该函数。
+     */
+    public suspend fun clearBuffer(memoryId: MemoryId, kind: BufferKind): Int
+
+    /**
+     * 裁剪指定类型缓冲区。
+     *
+     * recent buffer 使用该函数保留最近 maxMessages 条，避免移动端无限增长。
+     */
+    public suspend fun trimBuffer(memoryId: MemoryId, kind: BufferKind, maxMessages: Int): Int
+
+    /**
      * 标记当前记忆空间需要重建派生结构。
      *
      * 后续 Insight Tree 和 MemoryThread 重建会消费该标记。

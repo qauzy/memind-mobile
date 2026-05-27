@@ -10,6 +10,7 @@ import com.memind.mobile.core.model.MemoryScope
 import com.memind.mobile.core.model.Message
 import com.memind.mobile.core.model.RetrievalRequest
 import com.memind.mobile.core.model.Strategy
+import com.memind.mobile.core.search.InMemoryVectorSearch
 import com.memind.mobile.core.store.InMemoryStore
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -55,7 +56,8 @@ class MemoryTest {
         val id = MemoryId.of("test-user", "test-agent")
         val msg = Message.user("Hello from test")
         val result = memory.addMessage(id, msg)
-        assertEquals("ACCEPTED", result.status.name)
+        assertEquals("BUFFERED", result.status.name)
+        memory.commit(id)
         val items = memory.retrieve(id, "Hello", Strategy.SIMPLE)
         assertNotNull(items)
         assertTrue(items.items.isNotEmpty())
@@ -82,6 +84,7 @@ class MemoryTest {
     fun `test insight tree`() = runTest {
         val id = MemoryId.of("test-user", "test-agent")
         memory.addMessage(id, Message.user("I like hiking"))
+        memory.commit(id)
         val tree = memory.getInsightTree(id)
         assertNotNull(tree)
         assertTrue(tree.nodes.isNotEmpty())
@@ -130,11 +133,13 @@ class MemoryTest {
     fun `test retrieval request filters by scope and category`() = runTest {
         val id = MemoryId.of("scope-user", "scope-agent")
         memory.addMessage(id, Message.user("User likes hiking trails"))
+        memory.commit(id)
         memory.addMessage(
             id,
             Message.assistant("Always use the stable sync playbook"),
             ExtractionConfig.defaults().withScope(MemoryScope.AGENT),
         )
+        memory.commit(id, ExtractionConfig.defaults().withScope(MemoryScope.AGENT))
 
         val userResult = memory.retrieve(RetrievalRequest.userMemory(id, "hiking"))
         val agentResult = memory.retrieve(RetrievalRequest.agentMemory(id, "playbook"))
@@ -148,6 +153,140 @@ class MemoryTest {
         assertTrue(userResult.items.all { it.scope == MemoryScope.USER })
         assertTrue(agentResult.items.all { it.scope == MemoryScope.AGENT })
         assertTrue(eventResult.items.all { it.category == "event" })
+    }
+
+    /**
+     * 验证 addMessage 只写入缓冲区。
+     *
+     * commit 前不应检索到新消息，commit 后才会生成 MemoryItem。
+     */
+    @Test
+    fun `test add message buffers until commit`() = runTest {
+        val id = MemoryId.of("buffer-user", "buffer-agent")
+
+        memory.addMessage(id, Message.user("Buffered memory should wait"))
+        val beforeCommit = memory.retrieve(id, "Buffered", Strategy.SIMPLE)
+        memory.commit(id)
+        val afterCommit = memory.retrieve(id, "Buffered", Strategy.SIMPLE)
+
+        assertTrue(beforeCommit.items.isEmpty())
+        assertTrue(afterCommit.items.isNotEmpty())
+    }
+
+    /**
+     * 验证显式 metadata 可以触发自动提交。
+     *
+     * 该测试保护阶段 3 的轻量本地边界检测路径。
+     */
+    @Test
+    fun `test metadata can trigger automatic commit`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .build()
+        val id = MemoryId.of("auto-user", "auto-agent")
+
+        val result = scopedMemory.addMessage(
+            id,
+            Message("user", "Commit this message automatically", metadata = mapOf("commit" to "true")),
+        )
+        val retrieved = scopedMemory.retrieve(id, "automatically", Strategy.SIMPLE)
+
+        assertEquals("EXTRACTED", result.status.name)
+        assertTrue(retrieved.items.isNotEmpty())
+    }
+
+    /**
+     * 验证规则抽取器会执行 hash 去重。
+     *
+     * 相同内容重复抽取时不应创建第二条 MemoryItem。
+     */
+    @Test
+    fun `test rule extractor deduplicates exact content`() = runTest {
+        val store = InMemoryStore()
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .store(store)
+            .build()
+        val id = MemoryId.of("dedup-user", "dedup-agent")
+
+        scopedMemory.extract(id, "The user prefers compact summaries.")
+        scopedMemory.extract(id, "The user prefers compact summaries.")
+
+        assertEquals(1, store.count(id))
+    }
+
+    /**
+     * 验证 LLM JSON 抽取路径。
+     *
+     * 只有显式启用 withLlmExtraction 时才调用模型，否则默认规则抽取。
+     */
+    @Test
+    fun `test llm json extractor when enabled`() = runTest {
+        val scopedMemory = Memory.builder()
+            .chatClient(object : ChatClient {
+                override suspend fun chat(prompt: String, systemMessage: String?): ChatResponse =
+                    ChatResponse("""{"items":[{"text":"User prefers short answers.","category":"behavior","type":"fact"}]}""")
+
+                override suspend fun embed(text: String): EmbeddingResponse =
+                    EmbeddingResponse(listOf(0.1f, 0.2f))
+
+                override suspend fun health(): Boolean = true
+            })
+            .build()
+        val id = MemoryId.of("llm-user", "llm-agent")
+
+        val result = scopedMemory.extract(
+            id,
+            "The user prefers short answers.",
+            ExtractionConfig.defaults().withLlmExtraction(),
+        )
+        val retrieved = scopedMemory.retrieve(id, "short answers", Strategy.SIMPLE)
+
+        assertEquals(true, result.isSuccess)
+        assertEquals("behavior", retrieved.items.first().category)
+    }
+
+    /**
+     * 验证轻量时间解析。
+     *
+     * 文本中的 yyyy-MM-dd 会写入 occurredAt，便于后续 temporal retrieval。
+     */
+    @Test
+    fun `test extractor parses explicit date`() = runTest {
+        val store = InMemoryStore()
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .store(store)
+            .build()
+        val id = MemoryId.of("time-user", "time-agent")
+
+        scopedMemory.extract(id, "On 2026-05-27 the user finished migration.")
+        val item = store.getItems(id).first()
+
+        assertNotNull(item.occurredAt)
+        assertEquals("day", item.timeGranularity)
+    }
+
+    /**
+     * 验证语义去重可复用向量索引。
+     *
+     * 测试使用固定 embedding，让不同文本命中同一个最近向量。
+     */
+    @Test
+    fun `test semantic dedup uses vector search when enabled`() = runTest {
+        val store = InMemoryStore()
+        val scopedMemory = Memory.builder()
+            .chatClient(mockChatClient())
+            .store(store)
+            .vectorSearch(InMemoryVectorSearch())
+            .build()
+        val id = MemoryId.of("semantic-user", "semantic-agent")
+        val config = ExtractionConfig.defaults().withSemanticDedup()
+
+        scopedMemory.extract(id, "The user likes concise summaries.", config)
+        scopedMemory.extract(id, "The user prefers brief summaries.", config)
+
+        assertEquals(1, store.count(id))
     }
 
     /**

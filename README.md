@@ -91,7 +91,7 @@ The core flow is:
 - Android Library module: `com.memind.mobile.core`
 - Kotlin 2.1.0, JVM target 17
 - Android Gradle Plugin 8.7.3
-- compileSdk 35, minSdk 21
+- compileSdk 36.1, minSdk 21
 - In-memory storage with `InMemoryStore`
 - Local Room persistence with `RoomStore`
 - OpenAI-compatible client with `OpenAiClient`
@@ -102,29 +102,29 @@ The core flow is:
 ## Requirements
 
 - JDK 17
-- Android SDK with compileSdk 35 installed
-- Gradle 8.9 or newer
+- Android SDK with compileSdk 36.1 installed
+- Gradle 9.3.1 or newer
 
-This repository does not currently include a Gradle Wrapper, so the commands below use the local `gradle` executable. If a wrapper is added later, replace `gradle` with `./gradlew`. Because the project uses Android Gradle Plugin 8.7.3, the local Gradle version must be at least 8.9.
+This repository includes a Gradle Wrapper aligned with PokeClaw. Prefer `./gradlew` for local builds. The project uses Android Gradle Plugin 9.1.0, Kotlin 2.1.21, and Gradle 9.3.1.
 
 ## Build and Test
 
 Build the release AAR from the repository root:
 
 ```bash
-gradle :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:assembleRelease
 ```
 
 Run unit tests:
 
 ```bash
-gradle :memind-mobile-core:test
+./gradlew :memind-mobile-core:test
 ```
 
 Clean and rebuild:
 
 ```bash
-gradle :memind-mobile-core:clean :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:clean :memind-mobile-core:assembleRelease
 ```
 
 The generated release AAR is written to:
@@ -138,7 +138,7 @@ memind-mobile-core/build/outputs/aar/memind-mobile-core-release.aar
 The project is configured with `maven-publish`. Publish `memind-mobile-core` to the module-local Maven repository with:
 
 ```bash
-gradle :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
 ```
 
 Published coordinates:
@@ -289,16 +289,16 @@ This is an early mobile-core implementation. The current focus is stable APIs, l
 
 ```bash
 # List available tasks
-gradle tasks
+./gradlew tasks
 
 # Build release AAR
-gradle :memind-mobile-core:assembleRelease
+./gradlew :memind-mobile-core:assembleRelease
 
 # Run tests
-gradle :memind-mobile-core:test
+./gradlew :memind-mobile-core:test
 
 # Publish to the module-local Maven repository
-gradle :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
+./gradlew :memind-mobile-core:publishReleasePublicationToLocalBuildRepository
 ```
 
 ## License

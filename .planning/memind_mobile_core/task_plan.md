@@ -4,7 +4,7 @@
 在 Android 可嵌入、移动设备资源受限的前提下，让 `memind-mobile` 尽量接近原版 Memind 的核心思想：对话缓冲、结构化记忆抽取、分层检索、Insight Tree 演化，以及可直接给宿主 App 使用的上下文接口。
 
 ## 当前阶段
-阶段 2
+阶段 5
 
 ## 总体原则
 - 保持 `memind-mobile-core` 为无 UI、可 AAR 集成的 Kotlin 库。
@@ -23,29 +23,29 @@
 - **状态：** complete
 
 ### 阶段 2：核心数据模型与存储重构
-- [ ] 扩展 `MemoryItem`：scope、category、type、contentHash、rawDataId、vectorId、occurredAt、observedAt、metadata
-- [ ] 新增 `RawData` / `ConversationSegment` / `ContextWindow` / `RetrievalRequest`
-- [ ] 新增 USER 与 AGENT 分类：profile、behavior、event、tool、directive、playbook、resolution
-- [ ] 实现 `RoomStore`，覆盖 items、raw_data、insights、buffers、vectors 元数据
-- [ ] 保留 `InMemoryStore` 作为测试和临时模式
-- **状态：** in_progress
+- [x] 扩展 `MemoryItem`：scope、category、type、contentHash、rawDataId、vectorId、occurredAt、observedAt、metadata
+- [x] 新增 `RawData` / `ConversationSegment` / `ContextWindow` / `RetrievalRequest`
+- [x] 新增 USER 与 AGENT 分类：profile、behavior、event、tool、directive、playbook、resolution
+- [x] 实现 `RoomStore`，覆盖 items、raw_data、insights、buffers、vectors 元数据
+- [x] 保留 `InMemoryStore` 作为测试和临时模式
+- **状态：** complete
 
 ### 阶段 3：对话缓冲与 commit 语义
-- [ ] 实现 `PendingConversationBuffer` 和 `RecentConversationBuffer`
-- [ ] 修改 `addMessage`：写入 pending/recent buffer，不再直接生成最终 memory item
-- [ ] 实现轻量边界检测：本地规则优先，LLM detector 可选
-- [ ] 实现 `commit(id, config)`：drain pending buffer -> conversation segment -> extraction pipeline
-- [ ] 支持 sourceClient、timestamp、metadata 透传
-- **状态：** pending
+- [x] 实现 `PendingConversationBuffer` 和 `RecentConversationBuffer`
+- [x] 修改 `addMessage`：写入 pending/recent buffer，不再直接生成最终 memory item
+- [x] 实现轻量边界检测：本地规则优先，LLM detector 可选
+- [x] 实现 `commit(id, config)`：drain pending buffer -> conversation segment -> extraction pipeline
+- [x] 支持 sourceClient、timestamp、metadata 透传
+- **状态：** complete
 
 ### 阶段 4：移动版抽取 pipeline
-- [ ] 建立 `MemoryExtractor` 接口：raw processing -> item extraction -> dedup -> insight scheduling
-- [ ] 实现规则/启发式 extractor 作为离线 fallback
-- [ ] 实现 LLM JSON extractor，限制 token、条数和超时
-- [ ] 实现 hash 去重与近似语义去重
-- [ ] 实现时间解析的轻量版本：point time、range、observedAt
-- [ ] 支持 foresight 为可选功能，默认关闭
-- **状态：** pending
+- [x] 建立 `MemoryExtractor` 接口：raw processing -> item extraction -> dedup -> insight scheduling
+- [x] 实现规则/启发式 extractor 作为离线 fallback
+- [x] 实现 LLM JSON extractor，限制 token、条数和超时
+- [x] 实现 hash 去重与近似语义去重
+- [x] 实现时间解析的轻量版本：point time、range、observedAt
+- [x] 支持 foresight 为可选功能，默认关闭
+- **状态：** complete
 
 ### 阶段 5：混合检索与上下文接口
 - [ ] 实现 `getContext(ContextRequest)`，组合 recent messages 和 retrieval result

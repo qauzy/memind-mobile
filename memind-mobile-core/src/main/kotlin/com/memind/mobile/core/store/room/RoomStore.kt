@@ -7,6 +7,8 @@ import com.memind.mobile.core.model.MemoryId
 import com.memind.mobile.core.model.MemoryItemType
 import com.memind.mobile.core.model.MemoryScope
 import com.memind.mobile.core.model.RawData
+import com.memind.mobile.core.store.BufferKind
+import com.memind.mobile.core.store.BufferMessage
 import com.memind.mobile.core.store.InsightNode
 import com.memind.mobile.core.store.MemoryItem
 import com.memind.mobile.core.store.MemoryStore
@@ -17,6 +19,7 @@ public class RoomStore internal constructor(
     private val itemDao = database.memoryItemDao()
     private val rawDataDao = database.rawDataDao()
     private val insightDao = database.insightDao()
+    private val bufferDao = database.bufferMessageDao()
 
     /**
      * 保存或替换记忆 item。
@@ -175,6 +178,46 @@ public class RoomStore internal constructor(
      */
     override suspend fun getRawData(memoryId: MemoryId, limit: Int, offset: Int): List<RawData> =
         rawDataDao.getRawData(memoryId.toIdentifier(), limit, offset).map { it.toModel() }
+
+    /**
+     * 保存缓冲消息。
+     *
+     * RoomStore 复用 buffer_messages 表保存 pending/recent，保证进程重启后仍可 commit。
+     */
+    override suspend fun saveBufferMessage(message: BufferMessage): String {
+        bufferDao.upsert(RoomBufferMessageEntity.fromModel(message))
+        return message.id
+    }
+
+    /**
+     * 读取缓冲消息。
+     *
+     * 返回按写入顺序排列的领域模型列表。
+     */
+    override suspend fun getBufferMessages(
+        memoryId: MemoryId,
+        kind: BufferKind,
+        limit: Int,
+    ): List<BufferMessage> =
+        bufferDao.getMessages(memoryId.toIdentifier(), kind.name, limit).map { it.toModel() }
+
+    /**
+     * 清空指定缓冲区。
+     *
+     * commit drain pending 后调用，返回删除行数。
+     */
+    override suspend fun clearBuffer(memoryId: MemoryId, kind: BufferKind): Int =
+        bufferDao.clear(memoryId.toIdentifier(), kind.name)
+
+    /**
+     * 裁剪指定缓冲区。
+     *
+     * recent buffer 用它保留有限条数，避免 SQLite 表无限增长。
+     */
+    override suspend fun trimBuffer(memoryId: MemoryId, kind: BufferKind, maxMessages: Int): Int {
+        if (maxMessages < 0) return 0
+        return bufferDao.trim(memoryId.toIdentifier(), kind.name, maxMessages)
+    }
 
     /**
      * 标记派生结构需要重建。

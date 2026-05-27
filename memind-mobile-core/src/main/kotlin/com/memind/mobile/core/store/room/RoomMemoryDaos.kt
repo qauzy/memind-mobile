@@ -167,6 +167,26 @@ internal interface RoomBufferMessageDao {
      */
     @Query("DELETE FROM buffer_messages WHERE memoryKey = :memoryKey AND kind = :kind")
     suspend fun clear(memoryKey: String, kind: String): Int
+
+    /**
+     * 裁剪缓冲消息。
+     *
+     * 保留最新 limit 条记录，删除更旧内容，控制 recent buffer 体积。
+     */
+    @Query(
+        """
+        DELETE FROM buffer_messages
+        WHERE memoryKey = :memoryKey
+          AND kind = :kind
+          AND id NOT IN (
+              SELECT id FROM buffer_messages
+              WHERE memoryKey = :memoryKey AND kind = :kind
+              ORDER BY createdAt DESC
+              LIMIT :limit
+          )
+        """,
+    )
+    suspend fun trim(memoryKey: String, kind: String, limit: Int): Int
 }
 
 @Dao
